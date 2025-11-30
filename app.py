@@ -2,11 +2,13 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from vnstock import Vnstock
+import plotly.graph_objects as go
+from datetime import datetime
+import time
 
 # Config trang
 st.set_page_config(
-    page_title="StockGuru Việt Nam - Phiên bản Pro",
+    page_title="StockGuru Việt Nam - VNIndex Pro",
     page_icon="🎯",
     layout="wide"
 )
@@ -14,10 +16,10 @@ st.set_page_config(
 # Tiêu đề
 st.markdown("""
 <h1 style='text-align: center; color: #0066cc;'>
-    🎯 StockGuru Việt Nam <span style='font-size: 0.7em; color: #666;'>Phiên bản Pro</span>
+    🎯 StockGuru Việt Nam <span style='font-size: 0.7em; color: #666;'>VNIndex Pro Edition</span>
 </h1>
 <h3 style='text-align: center; color: #666; margin-bottom: 2rem;'>
-    Phân tích định giá chuyên nghiệp dựa trên báo cáo tài chính
+    Phân tích & định giá toàn bộ cổ phiếu VN-Index từ dữ liệu VCI/TCBS
 </h3>
 """, unsafe_allow_html=True)
 
@@ -79,13 +81,78 @@ st.markdown("""
         background-color: rgba(204, 0, 0, 0.1);
         border-left-color: #cc0000;
     }
+    .industry-table {
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    @media (max-width: 768px) {
+        .stColumn {
+            width: 100% !important;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: auto !important;
+            white-space: normal !important;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Class phân tích cổ phiếu chuyên nghiệp - PHIÊN BẢN TCBS
+# Danh sách các cổ phiếu trong VN30 (đại diện cho VN-Index)
+VN30_STOCKS = [
+    'VNM', 'VIC', 'FPT', 'VHM', 'HPG', 'TCB', 'MSN', 'VRE', 'MWG', 'BID', 
+    'CTG', 'VCB', 'ACB', 'MBB', 'TPB', 'GAS', 'VJC', 'BVH', 'SSI', 'VIB',
+    'POW', 'PLX', 'NVL', 'KDH', 'HDB', 'PNJ', 'SAB', 'REE', 'VCB', 'VHM'
+]
+
+# Danh sách ngành và P/E tham chiếu
+INDUSTRY_PE = {
+    'Ngân hàng': 8.5,
+    'Bất động sản': 6.5,
+    'Tiêu dùng': 20.0,
+    'Chứng khoán': 16.0,
+    'Công nghiệp': 12.0,
+    'Năng lượng': 14.0,
+    'Nguyên liệu': 10.0,
+    'Khác': 15.0
+}
+
+INDUSTRY_PB = {
+    'Ngân hàng': 1.2,
+    'Bất động sản': 0.9,
+    'Tiêu dùng': 3.5,
+    'Chứng khoán': 2.5,
+    'Công nghiệp': 1.8,
+    'Năng lượng': 1.5,
+    'Nguyên liệu': 1.3,
+    'Khác': 2.0
+}
+
+# Phân loại cổ phiếu theo ngành
+STOCK_INDUSTRY_MAP = {
+    # Ngân hàng
+    'BID': 'Ngân hàng', 'CTG': 'Ngân hàng', 'VCB': 'Ngân hàng', 'ACB': 'Ngân hàng', 'MBB': 'Ngân hàng', 
+    'TPB': 'Ngân hàng', 'VPB': 'Ngân hàng', 'TCB': 'Ngân hàng', 'HDB': 'Ngân hàng', 'STB': 'Ngân hàng', 
+    'VIB': 'Ngân hàng', 'EIB': 'Ngân hàng', 'SHB': 'Ngân hàng', 'LPB': 'Ngân hàng', 'MSB': 'Ngân hàng',
+    # Bất động sản
+    'VIC': 'Bất động sản', 'VHM': 'Bất động sản', 'NVL': 'Bất động sản', 'PDR': 'Bất động sản', 
+    'DXG': 'Bất động sản', 'KDH': 'Bất động sản', 'NLG': 'Bất động sản', 'VRE': 'Bất động sản',
+    # Tiêu dùng
+    'VNM': 'Tiêu dùng', 'MSN': 'Tiêu dùng', 'MWG': 'Tiêu dùng', 'PNJ': 'Tiêu dùng', 'SAB': 'Tiêu dùng', 
+    'HAG': 'Tiêu dùng', 'DGC': 'Tiêu dùng', 'GAS': 'Tiêu dùng', 'REE': 'Tiêu dùng',
+    # Chứng khoán
+    'SSI': 'Chứng khoán', 'VND': 'Chứng khoán', 'HCM': 'Chứng khoán', 'TVS': 'Chứng khoán', 'AGR': 'Chứng khoán',
+    # Công nghiệp
+    'VJC': 'Công nghiệp', 'HVN': 'Công nghiệp', 'FPT': 'Công nghiệp', 'HPG': 'Công nghiệp', 'POW': 'Công nghiệp',
+    # Năng lượng & Nguyên liệu
+    'PLX': 'Năng lượng', 'DPM': 'Nguyên liệu', 'DRC': 'Nguyên liệu', 'BWE': 'Năng lượng', 'PC1': 'Công nghiệp'
+}
+
 class StockAnalyzer:
-    def __init__(self, symbol):
+    def __init__(self, symbol, source='TCBS'):
         self.symbol = symbol.upper()
+        self.source = source
         self.ratios = None
         self.income = None
         self.balance = None
@@ -94,161 +161,174 @@ class StockAnalyzer:
         self.load_financial_data()
         
     def load_financial_data(self):
-        """Tải toàn bộ dữ liệu tài chính cần thiết từ TCBS"""
+        """Tải toàn bộ dữ liệu tài chính cần thiết từ nguồn đã chọn"""
         try:
-            # KHỞI TẠO ĐÚNG CÁCH VỚI TCBS
-            self.stock_obj = Vnstock().stock(symbol=self.symbol, source='TCBS')
-            self.finance = self.stock_obj.finance
+            from vnstock import Vnstock
+            if self.source == 'TCBS':
+                self.stock_obj = Vnstock().stock(symbol=self.symbol, source='TCBS')
+                self.finance = self.stock_obj.finance
+            else:  # VCI
+                # Sử dụng Finance trực tiếp từ vnstock cho VCI
+                from vnstock import Finance
+                self.finance = Finance(symbol=self.symbol, source='VCI')
             
             # Lấy chỉ số tài chính
             self.ratios = self.finance.ratio(period='year')
             
-            # Lấy báo cáo KQKD
-            self.income = self.finance.income_statement(period='year')
-            
-            # Lấy báo cáo CĐKT
-            self.balance = self.finance.balance_sheet(period='year')
-            
-            # Không bắt buộc phải có LCTT
+            # Lấy các báo cáo tài chính
+            try:
+                self.income = self.finance.income_statement(period='year')
+            except:
+                self.income = None
+                
+            try:
+                self.balance = self.finance.balance_sheet(period='year')
+            except:
+                self.balance = None
+                
             try:
                 self.cashflow = self.finance.cash_flow(period='year')
             except:
                 self.cashflow = None
                 
         except Exception as e:
-            st.error(f"❌ Lỗi khi kết nối dữ liệu TCBS: {str(e)}")
-            st.info("💡 Gợi ý: Thử lại với mã cổ phiếu HOSE phổ biến như FPT, VNM, VIC...")
+            st.error(f"❌ Lỗi khi kết nối dữ liệu {self.source}: {str(e)}")
     
     def get_latest_financial_metrics(self):
-        """Lấy các chỉ số tài chính quan trọng nhất - PHIÊN BẢN TCBS"""
+        """Lấy các chỉ số tài chính quan trọng nhất"""
         if self.ratios is None or self.ratios.empty:
-            st.error("❌ Không tải được dữ liệu tài chính")
             return None
         
         try:
-            # Lấy năm mới nhất
-            latest_year = self.ratios.index[0]
-            latest = self.ratios.loc[latest_year]
-            
-            # XÁC ĐỊNH TÊN CỘT HỢP LỆ VỚI TCBS
-            def safe_get_value(series, keys, default=0):
-                """Lấy giá trị an toàn với nhiều tên cột có thể"""
-                for key in keys:
-                    if key in series.index:
-                        value = series[key]
-                        if isinstance(value, (int, float)) and not pd.isna(value):
-                            return float(value)
-                return default
-            
-            # Trích xuất các chỉ số quan trọng từ TCBS
-            pe_ratio = safe_get_value(latest, ['pe', 'priceToEarning', 'P/E'])
-            pb_ratio = safe_get_value(latest, ['pb', 'priceToBook', 'P/B'])
-            ps_ratio = safe_get_value(latest, ['ps', 'priceToSales', 'P/S'])
-            
-            # EPS và BVPS - TCBS trả về đơn vị nghìn đồng, chuyển sang VND
-            eps = safe_get_value(latest, ['eps', 'earningsPerShare', 'EPS']) * 1000
-            bvps = safe_get_value(latest, ['bvps', 'bookValuePerShare', 'BVPS']) * 1000
-            
-            # Chỉ số sinh lời
-            roe = safe_get_value(latest, ['roe', 'returnOnEquity', 'ROE']) * 100  # chuyển sang %
-            roa = safe_get_value(latest, ['roa', 'returnOnAssets', 'ROA']) * 100  # chuyển sang %
-            gross_margin = safe_get_value(latest, ['grossMargin', 'biMargin', 'Biên lợi nhuận gộp']) * 100
-            net_margin = safe_get_value(latest, ['netMargin', 'postTaxMargin', 'Biên lợi nhuận ròng']) * 100
-            
-            # Chỉ số thanh khoản & đòn bẩy
-            current_ratio = safe_get_value(latest, ['currentRatio', 'Hệ số thanh toán hiện thời'], 1.0)
-            debt_to_equity = safe_get_value(latest, ['debtToEquity', 'Nợ/VCSH'], 0.5)
-            
-            # Tăng trưởng EPS
-            eps_cagr = safe_get_value(latest, ['epsGrowth', 'earningsPerShareGrowth']) * 100
-            
-            # Lấy thông tin thị trường từ overview
-            market_cap = None
-            shares_outstanding = None
-            
-            try:
-                if hasattr(self.stock_obj, 'overview'):
-                    overview = self.stock_obj.overview()
-                    market_cap = overview.get('marketCap')  # tỷ đồng
-                    # Lấy số CP lưu hành (đơn vị: triệu CP)
-                    shares_outstanding = overview.get('shareOutstanding', 0) / 1e6
-            except:
-                # Tính toán dự phòng
-                if eps > 0 and pe_ratio > 0 and market_cap is None:
-                    # Ước lượng vốn hóa từ P/E và EPS
-                    market_cap = (eps * pe_ratio * shares_outstanding) / 1e9 if shares_outstanding else None
-            
-            # Đảm bảo các giá trị hợp lệ
-            if eps <= 0 or bvps <= 0 or pe_ratio <= 0:
-                st.error("❌ Dữ liệu tài chính không hợp lệ (EPS, BVPS hoặc P/E ≤ 0)")
-                return None
-                
-            return {
-                'year': int(latest_year),
-                'pe_ratio': pe_ratio,
-                'pb_ratio': pb_ratio,
-                'ps_ratio': ps_ratio,
-                'eps': eps,
-                'bvps': bvps,
-                'market_cap': market_cap,
-                'shares_outstanding': shares_outstanding,
-                'roe': roe,
-                'roa': roa,
-                'gross_margin': gross_margin,
-                'net_margin': net_margin,
-                'current_ratio': current_ratio,
-                'debt_to_equity': debt_to_equity,
-                'eps_cagr': eps_cagr
-            }
-            
+            # Xử lý khác nhau tùy theo nguồn dữ liệu
+            if self.source == 'TCBS':
+                return self._get_metrics_tcbs()
+            else:
+                return self._get_metrics_vci()
         except Exception as e:
-            st.error(f"❌ Lỗi khi xử lý dữ liệu tài chính: {str(e)}")
-            st.info("📝 Gợi ý khắc phục: Thử các mã cổ phiếu phổ biến như FPT, VNM, VIC, VCB...")
+            st.warning(f"⚠️ Lỗi khi trích xuất chỉ số cho {self.symbol}: {str(e)}")
             return None
+    
+    def _get_metrics_tcbs(self):
+        """Lấy chỉ số từ TCBS (đơn giản hơn)"""
+        latest_year = self.ratios.index[0]
+        latest = self.ratios.loc[latest_year]
+        
+        pe_ratio = latest.get('pe', latest.get('priceToEarning', 0))
+        pb_ratio = latest.get('pb', latest.get('priceToBook', 0))
+        eps = latest.get('eps', latest.get('earningsPerShare', 0)) * 1000  # chuyển sang VND
+        bvps = latest.get('bvps', latest.get('bookValuePerShare', 0)) * 1000  # chuyển sang VND
+        roe = latest.get('roe', latest.get('returnOnEquity', 0)) * 100
+        net_margin = latest.get('netMargin', latest.get('postTaxMargin', 0)) * 100
+        current_ratio = latest.get('currentRatio', 1.0)
+        debt_to_equity = latest.get('debtToEquity', 0.5)
+        eps_growth = latest.get('epsGrowth', 0) * 100
+        
+        # Lấy thông tin thị trường
+        market_cap = None
+        shares_outstanding = None
+        
+        try:
+            if hasattr(self.stock_obj, 'overview'):
+                overview = self.stock_obj.overview()
+                market_cap = overview.get('marketCap')  # tỷ đồng
+                shares_outstanding = overview.get('shareOutstanding', 0) / 1e6  # triệu CP
+        except:
+            pass
+        
+        return {
+            'year': int(latest_year),
+            'pe_ratio': float(pe_ratio),
+            'pb_ratio': float(pb_ratio),
+            'eps': float(eps),
+            'bvps': float(bvps),
+            'roe': float(roe),
+            'net_margin': float(net_margin),
+            'current_ratio': float(current_ratio),
+            'debt_to_equity': float(debt_to_equity),
+            'eps_cagr': float(eps_growth),
+            'market_cap': float(market_cap) if market_cap else None,
+            'shares_outstanding': float(shares_outstanding) if shares_outstanding else None
+        }
+    
+    def _get_metrics_vci(self):
+        """Lấy chỉ số từ VCI (MultiIndex)"""
+        latest_year = self.ratios.index[0]
+        latest = self.ratios.loc[latest_year]
+        
+        def get_vci_value(keys):
+            """Truy xuất giá trị từ MultiIndex của VCI"""
+            for key in keys:
+                if isinstance(key, tuple) and key in latest.index:
+                    return float(latest[key])
+                # Thử tìm theo tên đơn giản
+                matches = [col for col in latest.index if isinstance(col, tuple) and key.lower() in col[1].lower()]
+                if matches:
+                    return float(latest[matches[0]])
+            return 0
+        
+        # Các tên cột có thể có cho từng chỉ số
+        pe_keys = [('Chỉ tiêu định giá', 'P/E'), ('Valuation Ratios', 'P/E')]
+        pb_keys = [('Chỉ tiêu định giá', 'P/B'), ('Valuation Ratios', 'P/B')]
+        eps_keys = [('Chỉ tiêu định giá', 'EPS (VND)'), ('Valuation Ratios', 'EPS (VND)')]
+        bvps_keys = [('Chỉ tiêu định giá', 'BVPS (VND)'), ('Valuation Ratios', 'BVPS (VND)')]
+        roe_keys = [('Chỉ tiêu khả năng sinh lợi', 'ROE (%)'), ('Profitability Ratios', 'ROE (%)')]
+        net_margin_keys = [('Chỉ tiêu khả năng sinh lợi', 'Biên lợi nhuận ròng (%)'), ('Profitability Ratios', 'Net Profit Margin (%)')]
+        current_ratio_keys = [('Chỉ tiêu thanh khoản', 'Chỉ số thanh toán hiện thời'), ('Liquidity Ratios', 'Current Ratio')]
+        debt_to_equity_keys = [('Chỉ tiêu cơ cấu nguồn vốn', 'Nợ/VCSH'), ('Financial Structure Ratios', 'Debt to Equity')]
+        eps_growth_keys = [('Chỉ tiêu định giá', 'Tăng trưởng EPS (%)'), ('Growth Ratios', 'EPS Growth (%)')]
+        
+        pe_ratio = get_vci_value(pe_keys)
+        pb_ratio = get_vci_value(pb_keys)
+        eps = get_vci_value(eps_keys)
+        bvps = get_vci_value(bvps_keys)
+        roe = get_vci_value(roe_keys)
+        net_margin = get_vci_value(net_margin_keys)
+        current_ratio = get_vci_value(current_ratio_keys)
+        debt_to_equity = get_vci_value(debt_to_equity_keys)
+        eps_growth = get_vci_value(eps_growth_keys)
+        
+        # Ước lượng vốn hóa và số CP lưu hành
+        market_cap = None
+        shares_outstanding = None
+        
+        # Thử lấy số CP lưu hành từ VCI
+        shares_keys = [('Chỉ tiêu định giá', 'Số CP lưu hành (Triệu CP)'), ('Valuation Ratios', 'Shares Outstanding (Million)')]
+        shares_value = get_vci_value(shares_keys)
+        if shares_value > 0:
+            shares_outstanding = shares_value
+        
+        return {
+            'year': int(latest_year),
+            'pe_ratio': float(pe_ratio),
+            'pb_ratio': float(pb_ratio),
+            'eps': float(eps),
+            'bvps': float(bvps),
+            'roe': float(roe),
+            'net_margin': float(net_margin),
+            'current_ratio': float(current_ratio),
+            'debt_to_equity': float(debt_to_equity),
+            'eps_cagr': float(eps_growth),
+            'market_cap': market_cap,
+            'shares_outstanding': shares_outstanding
+        }
     
     def get_industry_pe(self):
         """Lấy P/E trung bình ngành phù hợp với cổ phiếu"""
-        # Phân loại ngành dựa trên mã cổ phiếu
-        bank_stocks = ['BID', 'CTG', 'VCB', 'ACB', 'MBB', 'TPB', 'VPB', 'TCB', 'HDB', 'STB', 'VIB', 'EIB', 'SHB', 'LPB', 'MSB', 'NVB', 'ABB', 'BAB']
-        real_estate_stocks = ['VIC', 'VHM', 'NVL', 'PDR', 'DXG', 'KDH', 'NLG', 'TTC', 'HAR', 'DIG', 'LDG', 'CEO', 'TIP', 'SCR', 'VRE']
-        consumer_stocks = ['VNM', 'FPT', 'MWG', 'PNJ', 'SAB', 'MSN', 'HAG', 'DGC', 'GAS', 'REE', 'HCM']
-        securities_stocks = ['SSI', 'VND', 'HCM', 'TVS', 'AGR', 'CTS', 'MBS', 'VDS', 'SHS', 'APS', 'HSV', 'BSI', 'CVS', 'CJSC']
-        
-        if any(self.symbol.startswith(stock) for stock in bank_stocks):
-            return 8.5
-        elif any(self.symbol.startswith(stock) for stock in real_estate_stocks):
-            return 6.5
-        elif any(self.symbol.startswith(stock) for stock in consumer_stocks):
-            return 20.0
-        elif any(self.symbol.startswith(stock) for stock in securities_stocks):
-            return 16.0
-        else:
-            return 15.0  # Mặc định
+        industry = STOCK_INDUSTRY_MAP.get(self.symbol, 'Khác')
+        return INDUSTRY_PE.get(industry, 15.0)
     
     def get_industry_pb(self):
-        """Lấy P/B trung bình ngành"""
-        bank_stocks = ['BID', 'CTG', 'VCB', 'ACB', 'MBB', 'TPB', 'VPB', 'TCB', 'HDB', 'STB', 'VIB', 'EIB', 'SHB', 'LPB', 'MSB', 'NVB', 'ABB', 'BAB']
-        real_estate_stocks = ['VIC', 'VHM', 'NVL', 'PDR', 'DXG', 'KDH', 'NLG', 'TTC', 'HAR', 'DIG', 'LDG', 'CEO', 'TIP', 'SCR', 'VRE']
-        consumer_stocks = ['VNM', 'FPT', 'MWG', 'PNJ', 'SAB', 'MSN', 'HAG', 'DGC', 'GAS', 'REE', 'HCM']
-        securities_stocks = ['SSI', 'VND', 'HCM', 'TVS', 'AGR', 'CTS', 'MBS', 'VDS', 'SHS', 'APS', 'HSV', 'BSI', 'CVS', 'CJSC']
-        
-        if any(self.symbol.startswith(stock) for stock in bank_stocks):
-            return 1.2
-        elif any(self.symbol.startswith(stock) for stock in real_estate_stocks):
-            return 0.9
-        elif any(self.symbol.startswith(stock) for stock in consumer_stocks):
-            return 3.5
-        elif any(self.symbol.startswith(stock) for stock in securities_stocks):
-            return 2.5
-        else:
-            return 2.0
+        """Lấy P/B trung bình ngành phù hợp với cổ phiếu"""
+        industry = STOCK_INDUSTRY_MAP.get(self.symbol, 'Khác')
+        return INDUSTRY_PB.get(industry, 2.0)
     
-    def calculate_fair_value(self, metrics):
+    def calculate_fair_value(self, metrics, risk_free_rate=0.03):
         """Tính giá trị hợp lý bằng nhiều phương pháp"""
+        if metrics is None:
+            return None
+        
         try:
-            if metrics is None:
-                return None
-                
             current_price = metrics['pe_ratio'] * metrics['eps']
             results = {
                 'current_price': current_price,
@@ -268,7 +348,7 @@ class StockAnalyzer:
             results['methods']['pb_industry'] = pb_fair
             results['premiums']['pb_industry'] = (pb_fair - current_price) / current_price * 100
             
-            # 3. PEG Ratio (nếu có dữ liệu tăng trưởng hợp lệ)
+            # 3. PEG Ratio
             eps_growth = metrics['eps_cagr']
             if 1 <= eps_growth <= 100:  # Chỉ tính nếu tăng trưởng hợp lý
                 peg_ratio = 1.0
@@ -283,29 +363,45 @@ class StockAnalyzer:
                 if roe > 15:
                     roe_pe = 15 + (roe - 15) * 0.5
                 else:
-                    roe_pe = roe * 1.0
+                    roe_pe = roe * 1.2
                 roe_fair = metrics['eps'] * roe_pe
                 results['methods']['roe_based'] = roe_fair
                 results['premiums']['roe_based'] = (roe_fair - current_price) / current_price * 100
             
             # 5. Tính fair value tổng hợp
-            valid_methods = [method for method in results['methods'].keys() 
-                           if method in results['premiums'] and results['premiums'][method] is not None]
+            valid_methods = []
+            weights = {}
+            
+            # Gán trọng số dựa trên độ tin cậy của từng phương pháp
+            if 'pe_industry' in results['methods'] and pe_fair > 0:
+                valid_methods.append('pe_industry')
+                weights['pe_industry'] = 0.4
+            
+            if 'pb_industry' in results['methods'] and pb_fair > 0:
+                valid_methods.append('pb_industry')
+                weights['pb_industry'] = 0.3
+            
+            if 'peg' in results['methods'] and eps_growth > 0:
+                valid_methods.append('peg')
+                weights['peg'] = 0.2
+            
+            if 'roe_based' in results['methods'] and roe > 0:
+                valid_methods.append('roe_based')
+                weights['roe_based'] = 0.1
             
             if valid_methods:
-                # Trọng số hóa các phương pháp
-                weights = {
-                    'pe_industry': 0.4,
-                    'pb_industry': 0.3,
-                    'peg': 0.2 if 'peg' in valid_methods else 0,
-                    'roe_based': 0.1 if 'roe_based' in valid_methods else 0
-                }
+                weighted_sum = 0
+                total_weight = 0
                 
-                # Chuẩn hóa trọng số
-                total_weight = sum(weights[method] for method in valid_methods if weights[method] > 0)
+                for method in valid_methods:
+                    value = results['methods'][method]
+                    weight = weights.get(method, 0)
+                    if weight > 0:
+                        weighted_sum += value * weight
+                        total_weight += weight
+                
                 if total_weight > 0:
-                    fair_value = sum(results['methods'][method] * weights[method] 
-                                   for method in valid_methods if weights[method] > 0) / total_weight
+                    fair_value = weighted_sum / total_weight
                     premium = (fair_value - current_price) / current_price * 100
                     results['consensus'] = {
                         'fair_value': fair_value,
@@ -315,21 +411,21 @@ class StockAnalyzer:
             return results
             
         except Exception as e:
-            st.error(f"❌ Lỗi trong quá trình tính toán định giá: {str(e)}")
+            st.warning(f"Lỗi tính toán định giá cho {self.symbol}: {str(e)}")
             return None
     
     def get_recommendation(self, premium):
         """Đưa ra khuyến nghị dựa trên chênh lệch định giá"""
         if premium > 30:
-            return "STRONG BUY 🚀", "Cổ phiếu đang định giá RẤT THẤP so với giá trị thực, cơ hội sinh lời lớn.", "strong-buy"
+            return "STRONG BUY 🚀", "Cổ phiếu đang định giá RẤT THẤP so với giá trị thực", "strong-buy"
         elif premium > 15:
-            return "BUY 💰", "Cổ phiếu đang định giá THẤP so với giá trị thực, tiềm năng tăng trưởng tốt.", "buy"
+            return "BUY 💰", "Cổ phiếu đang định giá THẤP so với giá trị thực", "buy"
         elif premium > -5:
-            return "HOLD ⚖️", "Cổ phiếu đang định giá HỢP LÝ, có thể nắm giữ trong danh mục.", "hold"
+            return "HOLD ⚖️", "Cổ phiếu đang định giá HỢP LÝ", "hold"
         elif premium > -20:
-            return "REDUCE 📉", "Cổ phiếu đang định giá CAO so với giá trị thực, cân nhắc giảm tỷ trọng.", "reduce"
+            return "REDUCE 📉", "Cổ phiếu đang định giá CAO so với giá trị thực", "reduce"
         else:
-            return "SELL 🔴", "Cổ phiếu đang định giá RẤT CAO so với giá trị thực, nên chốt lời.", "sell"
+            return "SELL 🔴", "Cổ phiếu đang định giá RẤT CAO so với giá trị thực", "sell"
     
     def generate_pe_chart(self):
         """Tạo biểu đồ P/E lịch sử"""
@@ -337,24 +433,34 @@ class StockAnalyzer:
             return None
         
         try:
-            # Lấy 5 năm gần nhất
             years = self.ratios.index.tolist()[:5]
             pe_values = []
             
-            # Xác định tên cột P/E có sẵn
+            # Xác định tên cột P/E phù hợp
             pe_col = None
-            possible_cols = ['pe', 'priceToEarning', 'P/E']
-            for col in possible_cols:
-                if col in self.ratios.columns:
-                    pe_col = col
-                    break
+            if self.source == 'TCBS':
+                possible_cols = ['pe', 'priceToEarning', 'P/E']
+                for col in possible_cols:
+                    if col in self.ratios.columns:
+                        pe_col = col
+                        break
+            else:  # VCI
+                possible_cols = [('Chỉ tiêu định giá', 'P/E'), ('Valuation Ratios', 'P/E')]
+                for col in possible_cols:
+                    if col in self.ratios.columns:
+                        pe_col = col
+                        break
             
             if pe_col is None:
                 return None
             
             for year in years:
                 try:
-                    pe_value = self.ratios.loc[year, pe_col]
+                    if self.source == 'TCBS':
+                        pe_value = self.ratios.loc[year, pe_col]
+                    else:
+                        pe_value = self.ratios.loc[year][pe_col]
+                    
                     if pd.isna(pe_value) or pe_value <= 0:
                         pe_value = 0
                     pe_values.append(pe_value)
@@ -367,13 +473,11 @@ class StockAnalyzer:
                 'P/E': pe_values
             })
             
-            # Chỉ vẽ biểu đồ nếu có dữ liệu hợp lệ
             if sum(pe_values) > 0:
-                fig = px.line(df, x='Năm', y='P/E', markers=True, 
-                              title=f'P/E lịch sử {self.symbol}',
-                              line_shape='spline')
-                fig.update_traces(line=dict(width=3, color='#0066cc'), 
-                                  marker=dict(size=10, color='#ff6600'))
+                fig = px.bar(df, x='Năm', y='P/E', 
+                             title=f'P/E lịch sử {self.symbol}',
+                             color='P/E',
+                             color_continuous_scale='Blues')
                 fig.update_layout(
                     plot_bgcolor='white',
                     xaxis_title='Năm',
@@ -384,349 +488,440 @@ class StockAnalyzer:
             return None
             
         except Exception as e:
-            st.warning(f"⚠️ Không thể tạo biểu đồ: {str(e)}")
+            st.warning(f"Không thể tạo biểu đồ P/E cho {self.symbol}: {str(e)}")
             return None
     
-    def generate_financial_health_chart(self, metrics):
-        """Tạo biểu đồ sức khỏe tài chính"""
+    def generate_radar_chart(self, metrics):
+        """Tạo biểu đồ radar so sánh sức khỏe tài chính"""
         if metrics is None:
             return None
         
         try:
-            categories = ['ROE (%)', 'Margin (%)', 'Thanh khoản', 'Đòn bẩy']
+            categories = ['ROE', 'Lợi nhuận', 'Thanh khoản', 'Đòn bẩy']
             values = [
-                min(metrics['roe'] / 25 * 100, 100),  # Chuẩn hóa về 0-100
-                min(metrics['net_margin'] * 3, 100),  # Chuẩn hóa về 0-100
-                min(metrics['current_ratio'] * 33, 100),  # Chuẩn hóa về 0-100
-                max(100 - metrics['debt_to_equity'] * 25, 0)  # Chuẩn hóa về 0-100
+                min(metrics['roe'] / 20, 1.0),  # Chuẩn hóa về 0-1
+                min(metrics['net_margin'] / 20, 1.0),  # Chuẩn hóa về 0-1
+                min(metrics['current_ratio'] / 2, 1.0),  # Chuẩn hóa về 0-1
+                max(1.0 - metrics['debt_to_equity'] / 2, 0)  # Chuẩn hóa về 0-1
             ]
             
-            colors = ['#00cc66' if v > 70 else '#ff9900' if v > 40 else '#ff3333' for v in values]
-            
-            fig = px.bar(
-                x=categories,
-                y=values,
-                title="Sức khỏe tài chính tổng thể",
-                labels={'x': 'Chỉ số', 'y': 'Điểm (0-100)'}
-            )
-            
-            fig.update_traces(
-                marker_color=colors,
-                text=[f"{v:.0f}" for v in values],
-                textposition='outside'
-            )
+            fig = go.Figure(data=go.Scatterpolar(
+                r=values + [values[0]],  # Đóng vòng
+                theta=categories + [categories[0]],
+                fill='toself',
+                name=self.symbol,
+                line=dict(color='#0066cc')
+            ))
             
             fig.update_layout(
-                plot_bgcolor='white',
-                yaxis_range=[0, 110],
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True,
+                        range=[0, 1]
+                    )),
                 showlegend=False,
-                height=400
+                title=f"Sức khỏe tài chính {self.symbol}",
+                plot_bgcolor='white'
             )
             
             return fig
         except Exception as e:
-            st.warning(f"⚠️ Không thể tạo biểu đồ sức khỏe tài chính: {str(e)}")
+            st.warning(f"Không thể tạo biểu đồ radar cho {self.symbol}: {str(e)}")
             return None
 
-# Form nhập mã cổ phiếu
-with st.form("analysis_form"):
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        symbol = st.text_input("🔍 Nhập mã cổ phiếu", 
-                              value="FPT",
-                              placeholder="Ví dụ: FPT, VNM, VIC, VCB...",
-                              label_visibility="collapsed")
-        submitted = st.form_submit_button("🚀 Phân tích chuyên sâu", use_container_width=True)
+def get_vnindex_stocks():
+    """Lấy danh sách cổ phiếu VN30 (đại diện cho VN-Index)"""
+    return VN30_STOCKS
 
-# Xử lý khi nhấn nút phân tích
-if submitted and symbol:
-    # Kiểm tra tính hợp lệ của mã cổ phiếu
-    if len(symbol.strip()) < 2 or len(symbol.strip()) > 4:
-        st.error("❌ Mã cổ phiếu không hợp lệ. Vui lòng nhập mã HOSE chuẩn (2-4 ký tự).")
+def load_cached_analysis(source='TCBS'):
+    """Tải phân tích đã cache để tăng tốc độ"""
+    if f'vnindex_analysis_{source}' not in st.session_state:
+        st.session_state[f'vnindex_analysis_{source}'] = {}
+    return st.session_state[f'vnindex_analysis_{source}']
+
+def save_cached_analysis(data, source='TCBS'):
+    """Lưu cache phân tích"""
+    st.session_state[f'vnindex_analysis_{source}'] = data
+
+# Sidebar cho lựa chọn
+with st.sidebar:
+    st.header("⚙️ Cài đặt phân tích")
+    
+    # Chọn nguồn dữ liệu
+    data_source = st.selectbox(
+        "Chọn nguồn dữ liệu",
+        ["TCBS", "VCI"],
+        index=0,
+        help="TCBS: tốc độ nhanh hơn, VCI: dữ liệu chi tiết hơn"
+    )
+    
+    # Chọn cổ phiếu để phân tích
+    st.subheader("📈 Chọn cổ phiếu")
+    analysis_mode = st.radio(
+        "Chế độ phân tích",
+        ["Cổ phiếu đơn lẻ", "Danh mục VN30"],
+        index=1
+    )
+    
+    if analysis_mode == "Cổ phiếu đơn lẻ":
+        symbol_input = st.text_input("Nhập mã cổ phiếu", value="FPT", placeholder="Ví dụ: FPT, VNM, VIC...")
     else:
-        with st.spinner(f"Đang phân tích {symbol.upper()} từ dữ liệu TCBS..."):
-            try:
-                analyzer = StockAnalyzer(symbol)
-                metrics = analyzer.get_latest_financial_metrics()
-                
-                if metrics is None or metrics['eps'] <= 0:
-                    st.error(f"❌ Không tìm thấy dữ liệu hợp lệ cho mã **{symbol.upper()}**. Vui lòng thử mã khác.")
-                    st.info("💡 Gợi ý: Sử dụng mã cổ phiếu HOSE phổ biến như FPT, VNM, VIC, VCB, HPG, MWG...")
+        # Chọn nhóm ngành
+        industry_filter = st.multiselect(
+            "Lọc theo ngành",
+            options=list(set(STOCK_INDUSTRY_MAP.values())),
+            default=list(set(STOCK_INDUSTRY_MAP.values()))[:3]
+        )
+        
+        # Chọn số lượng cổ phiếu muốn phân tích
+        num_stocks = st.slider("Số lượng cổ phiếu", min_value=5, max_value=30, value=15)
+    
+    # Nút phân tích
+    analyze_btn = st.button("🚀 Bắt đầu phân tích", use_container_width=True)
+
+# Tab chính
+tab1, tab2, tab3 = st.tabs(["📊 Tổng quan", "🔍 Chi tiết ngành", "📈 Biểu đồ"])
+
+with tab1:
+    if analyze_btn:
+        with st.spinner("Đang phân tích dữ liệu..."):
+            if analysis_mode == "Cổ phiếu đơn lẻ" and symbol_input:
+                # Phân tích cổ phiếu đơn lẻ
+                symbol = symbol_input.strip().upper()
+                if len(symbol) < 2 or len(symbol) > 4:
+                    st.error("❌ Mã cổ phiếu không hợp lệ. Vui lòng nhập mã HOSE chuẩn (2-4 ký tự).")
                 else:
-                    # Tính fair value
-                    valuation = analyzer.calculate_fair_value(metrics)
+                    analyzer = StockAnalyzer(symbol, source=data_source)
+                    metrics = analyzer.get_latest_financial_metrics()
                     
-                    if valuation is None:
-                        st.error(f"❌ Không thể tính giá trị hợp lý cho {symbol.upper()}.")
+                    if metrics is None or metrics.get('eps', 0) <= 0:
+                        st.error(f"❌ Không tìm thấy dữ liệu hợp lệ cho mã **{symbol}**. Vui lòng thử mã khác.")
+                        st.info("💡 Gợi ý: Dùng mã cổ phiếu HOSE phổ biến như FPT, VNM, VIC, VCB, HPG...")
                     else:
-                        # Hiển thị kết quả
-                        st.subheader(f"📊 KẾT QUẢ PHÂN TÍCH CHUYÊN SÂU {symbol.upper()} - NĂM {metrics['year']}")
-                        st.markdown("---")
+                        valuation = analyzer.calculate_fair_value(metrics)
                         
-                        # Thông tin cơ bản
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.metric("Giá hiện tại", f"{valuation['current_price']:,.0f} VND")
-                        with col2:
-                            st.metric("EPS", f"{metrics['eps']:,.0f} VND")
-                        with col3:
-                            st.metric("BVPS", f"{metrics['bvps']:,.0f} VND")
-                        with col4:
-                            if metrics['market_cap']:
-                                st.metric("Vốn hóa", f"{metrics['market_cap']:,.0f} tỷ VND")
-                            else:
-                                st.metric("P/E hiện tại", f"{metrics['pe_ratio']:.1f}x")
-                        
-                        st.markdown("---")
-                        
-                        # Kết quả định giá
-                        if 'consensus' in valuation:
-                            fair_value = valuation['consensus']['fair_value']
-                            premium = valuation['consensus']['premium']
+                        if valuation is None:
+                            st.error(f"❌ Không thể tính giá trị hợp lý cho {symbol}.")
+                        else:
+                            # Hiển thị kết quả phân tích
+                            st.subheader(f"📊 KẾT QUẢ PHÂN TÍCH {symbol} - NĂM {metrics['year']}")
+                            st.markdown("---")
                             
-                            col1, col2 = st.columns([2, 1])
+                            # Thông tin cơ bản
+                            col1, col2, col3, col4 = st.columns(4)
                             with col1:
-                                st.metric("Giá trị hợp lý", f"{fair_value:,.0f} VND", 
-                                         delta=f"{premium:+.1f}%", delta_color="normal")
+                                st.metric("Giá hiện tại", f"{valuation['current_price']:,.0f} VND")
                             with col2:
-                                recommendation, desc, css_class = analyzer.get_recommendation(premium)
-                                st.markdown(f"""
-                                <div class="recommendation-box {css_class}">
-                                    <h3 style='margin: 0;'>{recommendation}</h3>
-                                    <p style='margin: 5px 0 0 0; font-size: 0.9em; color: #666;'>{desc}</p>
-                                </div>
-                                """, unsafe_allow_html=True)
-                        
-                        st.markdown("---")
-                        
-                        # Chi tiết các phương pháp định giá
-                        st.subheader("📈 CHI TIẾT PHƯƠNG PHÁP ĐỊNH GIÁ")
-                        
-                        methods_data = []
-                        if 'pe_industry' in valuation['methods']:
-                            methods_data.append({
-                                'Phương pháp': 'P/E ngành',
-                                'P/E tham chiếu': f"{analyzer.get_industry_pe():.1f}x",
-                                'Giá trị hợp lý (VND)': valuation['methods']['pe_industry'],
-                                'Chênh lệch (%)': valuation['premiums']['pe_industry']
-                            })
-                        
-                        if 'pb_industry' in valuation['methods']:
-                            methods_data.append({
-                                'Phương pháp': 'P/B ngành',
-                                'P/B tham chiếu': f"{analyzer.get_industry_pb():.1f}x",
-                                'Giá trị hợp lý (VND)': valuation['methods']['pb_industry'],
-                                'Chênh lệch (%)': valuation['premiums']['pb_industry']
-                            })
-                        
-                        if 'peg' in valuation['methods']:
-                            methods_data.append({
-                                'Phương pháp': 'PEG Ratio',
-                                'Tăng trưởng EPS': f"{metrics['eps_cagr']:.1f}%",
-                                'Giá trị hợp lý (VND)': valuation['methods']['peg'],
-                                'Chênh lệch (%)': valuation['premiums']['peg']
-                            })
-                        
-                        if 'roe_based' in valuation['methods']:
-                            methods_data.append({
-                                'Phương pháp': 'ROE-based',
-                                'ROE': f"{metrics['roe']:.1f}%",
-                                'Giá trị hợp lý (VND)': valuation['methods']['roe_based'],
-                                'Chênh lệch (%)': valuation['premiums']['roe_based']
-                            })
-                        
-                        if methods_
-                            methods_df = pd.DataFrame(methods_data)
+                                st.metric("EPS", f"{metrics['eps']:,.0f} VND")
+                            with col3:
+                                st.metric("BVPS", f"{metrics['bvps']:,.0f} VND")
+                            with col4:
+                                if metrics.get('market_cap'):
+                                    st.metric("Vốn hóa", f"{metrics['market_cap']:,.0f} tỷ VND")
+                                else:
+                                    st.metric("P/E hiện tại", f"{metrics['pe_ratio']:.1f}x")
                             
-                            # Định dạng bảng đẹp
-                            styled_df = methods_df.style.format({
-                                'Giá trị hợp lý (VND)': '{:,.0f}',
-                                'Chênh lệch (%)': '{:+.1f}%'
-                            }).applymap(
-                                lambda x: 'color: #00cc66' if isinstance(x, (int, float)) and x > 15 else (
-                                    'color: #ff9900' if isinstance(x, (int, float)) and x > -5 else 'color: #ff3333'),
-                                subset=['Chênh lệch (%)']
-                            ).set_properties(**{
-                                'text-align': 'center',
-                                'padding': '10px'
-                            })
+                            st.markdown("---")
                             
-                            st.dataframe(styled_df, use_container_width=True)
-                        
-                        st.markdown("---")
-                        
-                        # Biểu đồ và phân tích chi tiết
-                        st.subheader("🔍 PHÂN TÍCH CHI TIẾT")
-                        
-                        tab1, tab2, tab3 = st.tabs(["📈 P/E Lịch sử", "💪 Sức khỏe tài chính", "📊 Tổng quan"])
-                        
-                        with tab1:
+                            # Kết quả định giá
+                            if 'consensus' in valuation:
+                                fair_value = valuation['consensus']['fair_value']
+                                premium = valuation['consensus']['premium']
+                                
+                                col1, col2 = st.columns([2, 1])
+                                with col1:
+                                    st.metric("Giá trị hợp lý", f"{fair_value:,.0f} VND", 
+                                             delta=f"{premium:+.1f}%", delta_color="normal")
+                                with col2:
+                                    recommendation, desc, css_class = analyzer.get_recommendation(premium)
+                                    st.markdown(f"""
+                                    <div class="recommendation-box {css_class}">
+                                        <h3 style='margin: 0;'>{recommendation}</h3>
+                                        <p style='margin: 5px 0 0 0; font-size: 0.9em; color: #666;'>{desc}</p>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                            
+                            st.markdown("---")
+                            
+                            # Chi tiết các phương pháp định giá
+                            st.subheader("📈 CHI TIẾT PHƯƠNG PHÁP ĐỊNH GIÁ")
+                            
+                            methods_data = []
+                            if 'pe_industry' in valuation['methods']:
+                                methods_data.append({
+                                    'Phương pháp': 'P/E ngành',
+                                    'P/E tham chiếu': f"{analyzer.get_industry_pe():.1f}x",
+                                    'Giá trị hợp lý (VND)': valuation['methods']['pe_industry'],
+                                    'Chênh lệch (%)': valuation['premiums']['pe_industry']
+                                })
+                            
+                            if 'pb_industry' in valuation['methods']:
+                                methods_data.append({
+                                    'Phương pháp': 'P/B ngành',
+                                    'P/B tham chiếu': f"{analyzer.get_industry_pb():.1f}x",
+                                    'Giá trị hợp lý (VND)': valuation['methods']['pb_industry'],
+                                    'Chênh lệch (%)': valuation['premiums']['pb_industry']
+                                })
+                            
+                            if 'peg' in valuation['methods']:
+                                methods_data.append({
+                                    'Phương pháp': 'PEG Ratio',
+                                    'Tăng trưởng EPS': f"{metrics['eps_cagr']:.1f}%",
+                                    'Giá trị hợp lý (VND)': valuation['methods']['peg'],
+                                    'Chênh lệch (%)': valuation['premiums']['peg']
+                                })
+                            
+                            if 'roe_based' in valuation['methods']:
+                                methods_data.append({
+                                    'Phương pháp': 'ROE-based',
+                                    'ROE': f"{metrics['roe']:.1f}%",
+                                    'Giá trị hợp lý (VND)': valuation['methods']['roe_based'],
+                                    'Chênh lệch (%)': valuation['premiums']['roe_based']
+                                })
+                            
+                            if methods_
+                                methods_df = pd.DataFrame(methods_data)
+                                
+                                # Định dạng bảng đẹp
+                                styled_df = methods_df.style.format({
+                                    'Giá trị hợp lý (VND)': '{:,.0f}',
+                                    'Chênh lệch (%)': '{:+.1f}%'
+                                }).applymap(
+                                    lambda x: 'color: #00cc66' if isinstance(x, (int, float)) and x > 15 else (
+                                        'color: #ff9900' if isinstance(x, (int, float)) and x > -5 else 'color: #ff3333'),
+                                    subset=['Chênh lệch (%)']
+                                ).set_properties(**{
+                                    'text-align': 'center',
+                                    'padding': '10px'
+                                })
+                                
+                                st.dataframe(styled_df, use_container_width=True)
+                            
+                            st.markdown("---")
+                            
+                            # Biểu đồ và phân tích chi tiết
+                            st.subheader("🔍 PHÂN TÍCH CHI TIẾT")
+                            
+                            # Biểu đồ P/E lịch sử
                             pe_chart = analyzer.generate_pe_chart()
                             if pe_chart:
                                 st.plotly_chart(pe_chart, use_container_width=True)
-                                
-                                # Phân tích P/E
-                                current_pe = metrics['pe_ratio']
-                                if len(analyzer.ratios) >= 3:
-                                    avg_pe_3y = np.mean([
-                                        analyzer.ratios.iloc[i].get('pe', 
-                                                                   analyzer.ratios.iloc[i].get('priceToEarning', 0))
-                                        for i in range(3)
-                                    ])
-                                    pe_analysis = ""
-                                    
-                                    if current_pe < avg_pe_3y * 0.8:
-                                        pe_analysis = f"P/E hiện tại ({current_pe:.1f}) thấp hơn 20% so với trung bình 3 năm ({avg_pe_3y:.1f}), cho thấy cổ phiếu đang được định giá hấp dẫn."
-                                    elif current_pe > avg_pe_3y * 1.2:
-                                        pe_analysis = f"P/E hiện tại ({current_pe:.1f}) cao hơn 20% so với trung bình 3 năm ({avg_pe_3y:.1f}), có thể đang bị định giá cao."
-                                    else:
-                                        pe_analysis = f"P/E hiện tại ({current_pe:.1f}) ở mức tương đương với trung bình 3 năm ({avg_pe_3y:.1f}), phản ánh định giá hợp lý."
-                                    
-                                    st.info(pe_analysis)
-                            else:
-                                st.info("Không có đủ dữ liệu để hiển thị biểu đồ P/E lịch sử.")
-                        
-                        with tab2:
-                            health_chart = analyzer.generate_financial_health_chart(metrics)
-                            if health_chart:
-                                st.plotly_chart(health_chart, use_container_width=True)
-                                
-                                # Phân tích sức khỏe tài chính
-                                health_analysis = ""
-                                
-                                if metrics['roe'] > 15 and metrics['net_margin'] > 15 and metrics['current_ratio'] > 1.5 and metrics['debt_to_equity'] < 1:
-                                    health_analysis = "✅ **Sức khỏe tài chính TỐT**: Công ty có khả năng sinh lời cao, biên lợi nhuận tốt, thanh khoản ổn định và đòn bẩy tài chính an toàn, đủ điều kiện tăng trưởng bền vững."
-                                elif metrics['roe'] > 10 and metrics['net_margin'] > 10 and metrics['current_ratio'] > 1 and metrics['debt_to_equity'] < 2:
-                                    health_analysis = "🟡 **Sức khỏe tài chính TRUNG BÌNH**: Công ty có nền tảng tài chính chấp nhận được nhưng cần theo dõi một số chỉ số quan trọng để đảm bảo tăng trưởng ổn định."
-                                else:
-                                    health_analysis = "⚠️ **Sức khỏe tài chính YẾU**: Công ty có một số vấn đề về khả năng sinh lời, biên lợi nhuận thấp, hoặc rủi ro tài chính cao, cần thận trọng khi đầu tư."
-                                
-                                st.info(health_analysis)
-                            else:
-                                st.info("Không có đủ dữ liệu để phân tích sức khỏe tài chính.")
-                        
-                        with tab3:
-                            # Hiển thị các chỉ số tài chính quan trọng
-                            st.markdown("#### 📋 Chỉ số sinh lời")
+                            
+                            # Radar chart sức khỏe tài chính
+                            radar_chart = analyzer.generate_radar_chart(metrics)
+                            if radar_chart:
+                                st.plotly_chart(radar_chart, use_container_width=True)
+                            
+                            # Các chỉ số tài chính chi tiết
+                            st.markdown("#### 📋 Chỉ số tài chính quan trọng")
                             col1, col2, col3, col4 = st.columns(4)
                             with col1:
                                 st.metric("ROE (%)", f"{metrics['roe']:.1f}")
                             with col2:
-                                st.metric("ROA (%)", f"{metrics['roa']:.1f}")
-                            with col3:
-                                st.metric("Biên lợi nhuận gộp (%)", f"{metrics['gross_margin']:.1f}")
-                            with col4:
                                 st.metric("Biên lợi nhuận ròng (%)", f"{metrics['net_margin']:.1f}")
-                            
-                            st.markdown("#### 💰 Thanh khoản & Đòn bẩy")
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Hệ số thanh toán hiện tại", f"{metrics['current_ratio']:.2f}")
-                            with col2:
-                                st.metric("Nợ/Vốn CSH", f"{metrics['debt_to_equity']:.2f}")
                             with col3:
-                                st.metric("Tăng trưởng EPS (%)", f"{metrics['eps_cagr']:.1f}")
+                                st.metric("Hệ số thanh toán hiện tại", f"{metrics['current_ratio']:.2f}")
+                            with col4:
+                                st.metric("Nợ/Vốn CSH", f"{metrics['debt_to_equity']:.2f}")
                             
-                            # Phân tích tổng quan
-                            st.markdown("#### 📝 Nhận xét tổng quan")
-                            overview = f"""
-                            <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 15px;'>
-                                <p><strong>{symbol.upper()}</strong> là một công ty thuộc <strong>ngành {analyzer.get_industry_pe().__class__.__name__}</strong> 
-                                với mức P/E tham chiếu ngành là <strong>{analyzer.get_industry_pe():.1f}x</strong> và P/B tham chiếu là <strong>{analyzer.get_industry_pb():.1f}x</strong>.</p>
+                            st.markdown("---")
+                            
+                            # Kết luận chuyên gia
+                            st.subheader("🎯 KẾT LUẬN CHUYÊN GIA")
+                            
+                            if 'consensus' in valuation:
+                                conclusion = f"""
+                                <div class="recommendation-box {css_class}">
+                                    <p style='font-size: 1.1em; line-height: 1.6; margin-bottom: 10px;'>
+                                        <strong>{symbol}</strong> hiện đang được định giá ở mức <strong>{premium:+.1f}%</strong> so với giá trị hợp lý được tính toán từ nhiều phương pháp định giá khác nhau.
+                                    </p>
+                                    
+                                    <p style='font-size: 1.1em; line-height: 1.6; margin-bottom: 10px;'>
+                                        Dựa trên phân tích các chỉ số tài chính quan trọng, đặc biệt là <strong>ROE {metrics['roe']:.1f}%</strong> và 
+                                        <strong>biên lợi nhuận ròng {metrics['net_margin']:.1f}%</strong>, 
+                                        công ty thể hiện <strong>{'tiềm năng tăng trưởng tốt' if metrics['roe'] > 12 and metrics['eps_cagr'] > 10 else 'năng lực kinh doanh ổn định'}</strong>.
+                                    </p>
+                                    
+                                    <p style='font-size: 1.1em; line-height: 1.6; margin-bottom: 0;'>
+                                        <strong>Khuyến nghị đầu tư:</strong> {recommendation} - {desc}
+                                    </p>
+                                </div>
+                                """
+                                st.markdown(conclusion, unsafe_allow_html=True)
+            
+            else:  # Phân tích danh mục VN30
+                # Lấy danh sách cổ phiếu theo ngành đã chọn
+                if industry_filter:
+                    stocks_to_analyze = [stock for stock, industry in STOCK_INDUSTRY_MAP.items() 
+                                       if industry in industry_filter and stock in VN30_STOCKS]
+                else:
+                    stocks_to_analyze = VN30_STOCKS
+                
+                # Giới hạn số lượng
+                stocks_to_analyze = stocks_to_analyze[:num_stocks]
+                
+                if not stocks_to_analyze:
+                    st.error("❌ Không có cổ phiếu nào phù hợp với tiêu chí đã chọn.")
+                else:
+                    # Tạo cache để tránh tải lại nhiều lần
+                    cached_analysis = load_cached_analysis(data_source)
+                    stocks_analyzed = []
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    for i, symbol in enumerate(stocks_to_analyze):
+                        status_text.text(f"Đang phân tích {symbol} ({i+1}/{len(stocks_to_analyze)})...")
+                        progress_bar.progress((i + 1) / len(stocks_to_analyze))
+                        
+                        # Sử dụng cache nếu có
+                        if symbol in cached_analysis and cached_analysis[symbol].get('source') == data_source:
+                            stocks_analyzed.append(cached_analysis[symbol])
+                        else:
+                            try:
+                                analyzer = StockAnalyzer(symbol, source=data_source)
+                                metrics = analyzer.get_latest_financial_metrics()
                                 
-                                <p>Công ty có hệ số <strong>ROE {metrics['roe']:.1f}%</strong>, cho thấy khả năng sinh lời trên vốn chủ sở hữu ở mức 
-                                <strong>{'rất tốt' if metrics['roe'] > 15 else 'khá tốt' if metrics['roe'] > 10 else 'trung bình' if metrics['roe'] > 5 else 'thấp'}</strong>. 
-                                Biên lợi nhuận ròng đạt <strong>{metrics['net_margin']:.1f}%</strong>, phản ánh hiệu quả hoạt động kinh doanh 
-                                <strong>{'cao' if metrics['net_margin'] > 15 else 'trung bình' if metrics['net_margin'] > 8 else 'cần cải thiện'}</strong>.</p>
+                                if metrics and metrics.get('eps', 0) > 0:
+                                    valuation = analyzer.calculate_fair_value(metrics)
+                                    if valuation and 'consensus' in valuation:
+                                        industry = STOCK_INDUSTRY_MAP.get(symbol, 'Khác')
+                                        fair_value = valuation['consensus']['fair_value']
+                                        premium = valuation['consensus']['premium']
+                                        recommendation, _, css_class = analyzer.get_recommendation(premium)
+                                        
+                                        stock_data = {
+                                            'symbol': symbol,
+                                            'industry': industry,
+                                            'current_price': valuation['current_price'],
+                                            'fair_value': fair_value,
+                                            'premium': premium,
+                                            'recommendation': recommendation,
+                                            'css_class': css_class,
+                                            'eps': metrics['eps'],
+                                            'roe': metrics['roe'],
+                                            'pe_ratio': metrics['pe_ratio'],
+                                            'pb_ratio': metrics['pb_ratio'],
+                                            'year': metrics['year'],
+                                            'source': data_source
+                                        }
+                                        stocks_analyzed.append(stock_data)
+                                        cached_analysis[symbol] = stock_data
+                            except Exception as e:
+                                st.warning(f"Không thể phân tích {symbol}: {str(e)}")
+                        
+                        # Thêm delay để tránh bị chặn
+                        time.sleep(0.5)
+                    
+                    # Lưu cache
+                    save_cached_analysis(cached_analysis, data_source)
+                    status_text.empty()
+                    
+                    if not stocks_analyzed:
+                        st.error("❌ Không phân tích được cổ phiếu nào. Vui lòng thử lại sau.")
+                    else:
+                        st.subheader(f"📊 BẢNG PHÂN TÍCH {len(stocks_analyzed)} CỔ PHIẾU VN30")
+                        st.markdown(f"*Nguồn dữ liệu: {data_source} | Cập nhật ngày: {datetime.now().strftime('%d/%m/%Y')}*")
+                        
+                        # Hiển thị kết quả theo ngành
+                        industries = sorted(set([stock['industry'] for stock in stocks_analyzed]))
+                        
+                        for industry in industries:
+                            industry_stocks = [stock for stock in stocks_analyzed if stock['industry'] == industry]
+                            if industry_stocks:
+                                st.markdown(f"### 📌 Ngành {industry}")
+                                st.markdown(f"*P/E tham chiếu ngành: {INDUSTRY_PE.get(industry, 15.0):.1f}x | P/B tham chiếu: {INDUSTRY_PB.get(industry, 2.0):.1f}x*")
                                 
-                                <p>Khả năng thanh khoản được đánh giá ở mức 
-                                <strong>{'tốt' if metrics['current_ratio'] > 1.5 else 'chấp nhận được' if metrics['current_ratio'] > 1 else 'yếu'}</strong> 
-                                với hệ số thanh toán hiện tại là <strong>{metrics['current_ratio']:.2f}</strong>. 
-                                Đòn bẩy tài chính ở mức <strong>{'an toàn' if metrics['debt_to_equity'] < 1 else 'trung bình' if metrics['debt_to_equity'] < 2 else 'rủi ro cao'}</strong> 
-                                với tỷ lệ nợ/vốn chủ sở hữu là <strong>{metrics['debt_to_equity']:.2f}</strong>.</p>
-                            </div>
-                            """
-                            st.markdown(overview, unsafe_allow_html=True)
+                                # Tạo DataFrame cho ngành
+                                industry_df = pd.DataFrame(industry_stocks)
+                                industry_df = industry_df.sort_values('premium', ascending=False)
+                                
+                                # Định dạng bảng
+                                def color_recommendation(val):
+                                    colors = {
+                                        'STRONG BUY': '#e6ffe6',
+                                        'BUY': '#e6f7ff',
+                                        'HOLD': '#fff8e6',
+                                        'REDUCE': '#ffe6e6',
+                                        'SELL': '#ffcccc'
+                                    }
+                                    return f'background-color: {colors.get(val, "white")}'
+                                
+                                styled_df = industry_df[['symbol', 'current_price', 'fair_value', 'premium', 'recommendation']].style\
+                                    .format({
+                                        'current_price': '{:,.0f}',
+                                        'fair_value': '{:,.0f}',
+                                        'premium': '{:+.1f}%'
+                                    })\
+                                    .applymap(lambda x: 'color: #00cc66' if isinstance(x, float) and x > 15 else (
+                                             'color: #ff9900' if isinstance(x, float) and x > -5 else 'color: #ff3333'), 
+                                             subset=['premium'])\
+                                    .applymap(color_recommendation, subset=['recommendation'])
+                                
+                                st.dataframe(styled_df, use_container_width=True)
                         
                         st.markdown("---")
                         
-                        # Kết luận chuyên gia
-                        st.subheader("🎯 KẾT LUẬN CHUYÊN GIA")
+                        # Tạo biểu đồ phân tích
+                        st.subheader("📈 BIỂU ĐỒ PHÂN TÍCH")
                         
-                        conclusion = f"""
-                        <div class="recommendation-box {css_class}">
-                            <p style='font-size: 1.1em; line-height: 1.6; margin-bottom: 10px;'>
-                                <strong>{symbol.upper()}</strong> hiện đang được định giá ở mức <strong>{premium:+.1f}%</strong> so với giá trị hợp lý được tính toán từ nhiều phương pháp định giá khác nhau.
-                            </p>
-                            
-                            <p style='font-size: 1.1em; line-height: 1.6; margin-bottom: 10px;'>
-                                Dựa trên phân tích các chỉ số tài chính quan trọng, đặc biệt là <strong>ROE {metrics['roe']:.1f}%</strong>, 
-                                <strong>biên lợi nhuận ròng {metrics['net_margin']:.1f}%</strong> và 
-                                <strong>tăng trưởng EPS {metrics['eps_cagr']:.1f}%</strong>, 
-                                công ty thể hiện <strong>{'tiềm năng tăng trưởng tốt' if metrics['roe'] > 12 and metrics['eps_cagr'] > 10 else 'năng lực kinh doanh ổn định' if metrics['roe'] > 8 else 'một số thách thức trong hoạt động kinh doanh'}</strong>.
-                            </p>
-                            
-                            <p style='font-size: 1.1em; line-height: 1.6; margin-bottom: 0;'>
-                                <strong>Khuyến nghị đầu tư:</strong> {recommendation} - {desc}
-                            </p>
-                        </div>
-                        """
+                        # Biểu đồ phân tán P/E vs Premium
+                        fig = px.scatter(
+                            stocks_analyzed,
+                            x='pe_ratio',
+                            y='premium',
+                            color='industry',
+                            size='roe',
+                            hover_name='symbol',
+                            title='P/E Ratio vs Chênh lệch định giá',
+                            labels={
+                                'pe_ratio': 'P/E Ratio',
+                                'premium': 'Chênh lệch định giá (%)',
+                                'roe': 'ROE (%)'
+                            },
+                            width=800,
+                            height=500
+                        )
                         
-                        st.markdown(conclusion, unsafe_allow_html=True)
+                        # Thêm đường tham chiếu
+                        fig.add_hline(y=0, line_dash="dash", line_color="gray")
+                        fig.add_vline(x=15, line_dash="dash", line_color="gray")
                         
-            except Exception as e:
-                error_msg = str(e)
-                if "403" in error_msg or "Forbidden" in error_msg:
-                    st.error("❌ Lỗi kết nối với nguồn dữ liệu TCBS. Vui lòng thử lại sau.")
-                    st.info("💡 Gợi ý: Hệ thống có thể đang bảo trì hoặc bị giới hạn truy cập. Thử lại sau vài phút.")
-                elif "No data" in error_msg or "empty" in error_msg or "None" in error_msg:
-                    st.error(f"❌ Không có dữ liệu cho mã **{symbol.upper()}**. Vui lòng thử mã khác.")
-                    st.info("💡 Gợi ý: Dùng mã cổ phiếu HOSE phổ biến như FPT, VNM, VIC, VCB, HPG, MWG, SAB...")
-                elif "symbol" in error_msg.lower():
-                    st.error("❌ Mã cổ phiếu không hợp lệ hoặc không tồn tại trên sàn HOSE.")
-                    st.info("💡 Gợi ý: Dùng mã cổ phiếu HOSE chuẩn (2-4 chữ cái), ví dụ: FPT, VNM, VIC, VCB...")
-                else:
-                    st.error(f"❌ Lỗi không xác định: {error_msg}")
-                    st.info("💡 Gợi ý: Thử lại với mã khác hoặc liên hệ hỗ trợ.")
-else:
-    # Hiển thị hướng dẫn khi chưa nhập mã
-    st.markdown("""
-    <div style='background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-top: 20px;'>
-        <h3 style='color: #0066cc; margin-top: 0;'>📖 Hướng dẫn sử dụng</h3>
-        <p>1. <strong>Nhập mã cổ phiếu</strong> vào ô tìm kiếm phía trên (ví dụ: FPT, VNM, VIC...)</p>
-        <p>2. Nhấn nút <strong>"🚀 Phân tích chuyên sâu"</strong></p>
-        <p>3. Xem <strong>kết quả phân tích chi tiết</strong> với các thông tin:</p>
-        <ul>
-            <li>Giá trị hợp lý và chênh lệch so với giá hiện tại</li>
-            <li>Biểu đồ P/E lịch sử</li>
-            <li>Sức khỏe tài chính tổng thể</li>
-            <li>Các chỉ số tài chính quan trọng (ROE, biên lợi nhuận, thanh khoản...)</li>
-            <li>Khuyến nghị đầu tư chuyên nghiệp</li>
-        </ul>
-        <p style='background-color: #e3f2fd; padding: 10px; border-radius: 5px; margin-top: 15px;'>
-            💡 <strong>Mẹo:</strong> Sử dụng các mã cổ phiếu phổ biến trên HOSE như FPT, VNM, VIC, VCB, HPG để có kết quả tốt nhất.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Tải về kết quả
+                        st.markdown("---")
+                        st.subheader("💾 TẢI VỀ KẾT QUẢ")
+                        
+                        results_df = pd.DataFrame(stocks_analyzed)
+                        csv = results_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Tải về CSV",
+                            data=csv,
+                            file_name=f"vnindex_analysis_{data_source}_{datetime.now().strftime('%Y%m%d')}.csv",
+                            mime="text/csv"
+                        )
+    else:
+        # Hiển thị hướng dẫn khi chưa phân tích
+        st.markdown("""
+        <div style='background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-top: 20px;'>
+            <h3 style='color: #0066cc; margin-top: 0;'>📖 Hướng dẫn sử dụng</h3>
+            <p><strong>StockGuru Việt Nam - Phiên bản VNIndex Pro</strong> cho phép bạn:</p>
+            <ul>
+                <li>🔹 Phân tích từng cổ phiếu đơn lẻ trong VN-Index</li>
+                <li>🔹 So sánh hàng loạt cổ phiếu theo ngành</li>
+                <li>🔹 Định giá cổ phiếu bằng nhiều phương pháp (P/E, P/B, PEG, ROE-based)</li>
+                <li>🔹 Đánh giá sức khỏe tài chính qua các chỉ số ROE, biên lợi nhuận, thanh khoản</li>
+                <li>🔹 So sánh với P/E, P/B trung bình ngành</li>
+            </ul>
+            <p style='background-color: #e3f2fd; padding: 10px; border-radius: 5px; margin-top: 15px;'>
+                💡 <strong>Mẹo sử dụng:</strong> Chọn "Danh mục VN30" để xem báo cáo tổng quan toàn thị trường, hoặc chọn "Cổ phiếu đơn lẻ" để phân tích chi tiết một mã cụ thể.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
 # Footer
 st.markdown("---")
 st.caption("""
-📊 Dữ liệu từ TCBS qua thư viện vnstock | 📈 Phương pháp định giá: P/E, P/B, PEG, ROE-based | 
+📊 Dữ liệu từ VCI/TCBS qua thư viện vnstock | 📈 Phương pháp định giá: P/E, P/B, PEG, ROE-based | 
 💡 Kết quả chỉ mang tính tham khảo - Không phải lời khuyên đầu tư
 """)
-
-# CSS bổ sung cho mobile
-st.markdown("""
-<style>
-@media (max-width: 768px) {
-    .stColumn {
-        width: 100% !important;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: auto !important;
-        white-space: normal !important;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
