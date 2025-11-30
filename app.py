@@ -654,4 +654,98 @@ if submitted and symbol:
                                 với mức P/E tham chiếu ngành là <strong>{analyzer.get_industry_pe():.1f}x</strong> và P/B tham chiếu là <strong>{analyzer.get_industry_pb():.1f}x</strong>.</p>
                                 
                                 <p>Công ty có hệ số <strong>ROE {metrics['roe']:.1f}%</strong>, cho thấy khả năng sinh lời trên vốn chủ sở hữu ở mức 
-                                <strong>{'rất tốt' if metrics['roe'] > 15 else 'khá tốt' if metrics['roe'] > 10 else 'trung bình'
+                                <strong>{'rất tốt' if metrics['roe'] > 15 else 'khá tốt' if metrics['roe'] > 10 else 'trung bình' if metrics['roe'] > 5 else 'thấp'}</strong>. 
+                                Biên lợi nhuận ròng đạt <strong>{metrics['net_margin']:.1f}%</strong>, phản ánh hiệu quả hoạt động kinh doanh 
+                                <strong>{'cao' if metrics['net_margin'] > 15 else 'trung bình' if metrics['net_margin'] > 8 else 'cần cải thiện'}</strong>.</p>
+                                
+                                <p>Khả năng thanh khoản được đánh giá ở mức 
+                                <strong>{'tốt' if metrics['current_ratio'] > 1.5 else 'chấp nhận được' if metrics['current_ratio'] > 1 else 'yếu'}</strong> 
+                                với hệ số thanh toán hiện tại là <strong>{metrics['current_ratio']:.2f}</strong>. 
+                                Đòn bẩy tài chính ở mức <strong>{'an toàn' if metrics['debt_to_equity'] < 1 else 'trung bình' if metrics['debt_to_equity'] < 2 else 'rủi ro cao'}</strong> 
+                                với tỷ lệ nợ/vốn chủ sở hữu là <strong>{metrics['debt_to_equity']:.2f}</strong>.</p>
+                            </div>
+                            """
+                            st.markdown(overview, unsafe_allow_html=True)
+                        
+                        st.markdown("---")
+                        
+                        # Kết luận chuyên gia
+                        st.subheader("🎯 KẾT LUẬN CHUYÊN GIA")
+                        
+                        conclusion = f"""
+                        <div class="recommendation-box {css_class}">
+                            <p style='font-size: 1.1em; line-height: 1.6; margin-bottom: 10px;'>
+                                <strong>{symbol.upper()}</strong> hiện đang được định giá ở mức <strong>{premium:+.1f}%</strong> so với giá trị hợp lý được tính toán từ nhiều phương pháp định giá khác nhau.
+                            </p>
+                            
+                            <p style='font-size: 1.1em; line-height: 1.6; margin-bottom: 10px;'>
+                                Dựa trên phân tích các chỉ số tài chính quan trọng, đặc biệt là <strong>ROE {metrics['roe']:.1f}%</strong>, 
+                                <strong>biên lợi nhuận ròng {metrics['net_margin']:.1f}%</strong> và 
+                                <strong>tăng trưởng EPS {metrics['eps_cagr']:.1f}%</strong>, 
+                                công ty thể hiện <strong>{'tiềm năng tăng trưởng tốt' if metrics['roe'] > 12 and metrics['eps_cagr'] > 10 else 'năng lực kinh doanh ổn định' if metrics['roe'] > 8 else 'một số thách thức trong hoạt động kinh doanh'}</strong>.
+                            </p>
+                            
+                            <p style='font-size: 1.1em; line-height: 1.6; margin-bottom: 0;'>
+                                <strong>Khuyến nghị đầu tư:</strong> {recommendation} - {desc}
+                            </p>
+                        </div>
+                        """
+                        
+                        st.markdown(conclusion, unsafe_allow_html=True)
+                        
+            except Exception as e:
+                error_msg = str(e)
+                if "403" in error_msg or "Forbidden" in error_msg:
+                    st.error("❌ Lỗi kết nối với nguồn dữ liệu TCBS. Vui lòng thử lại sau.")
+                    st.info("💡 Gợi ý: Hệ thống có thể đang bảo trì hoặc bị giới hạn truy cập. Thử lại sau vài phút.")
+                elif "No data" in error_msg or "empty" in error_msg or "None" in error_msg:
+                    st.error(f"❌ Không có dữ liệu cho mã **{symbol.upper()}**. Vui lòng thử mã khác.")
+                    st.info("💡 Gợi ý: Dùng mã cổ phiếu HOSE phổ biến như FPT, VNM, VIC, VCB, HPG, MWG, SAB...")
+                elif "symbol" in error_msg.lower():
+                    st.error("❌ Mã cổ phiếu không hợp lệ hoặc không tồn tại trên sàn HOSE.")
+                    st.info("💡 Gợi ý: Dùng mã cổ phiếu HOSE chuẩn (2-4 chữ cái), ví dụ: FPT, VNM, VIC, VCB...")
+                else:
+                    st.error(f"❌ Lỗi không xác định: {error_msg}")
+                    st.info("💡 Gợi ý: Thử lại với mã khác hoặc liên hệ hỗ trợ.")
+else:
+    # Hiển thị hướng dẫn khi chưa nhập mã
+    st.markdown("""
+    <div style='background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-top: 20px;'>
+        <h3 style='color: #0066cc; margin-top: 0;'>📖 Hướng dẫn sử dụng</h3>
+        <p>1. <strong>Nhập mã cổ phiếu</strong> vào ô tìm kiếm phía trên (ví dụ: FPT, VNM, VIC...)</p>
+        <p>2. Nhấn nút <strong>"🚀 Phân tích chuyên sâu"</strong></p>
+        <p>3. Xem <strong>kết quả phân tích chi tiết</strong> với các thông tin:</p>
+        <ul>
+            <li>Giá trị hợp lý và chênh lệch so với giá hiện tại</li>
+            <li>Biểu đồ P/E lịch sử</li>
+            <li>Sức khỏe tài chính tổng thể</li>
+            <li>Các chỉ số tài chính quan trọng (ROE, biên lợi nhuận, thanh khoản...)</li>
+            <li>Khuyến nghị đầu tư chuyên nghiệp</li>
+        </ul>
+        <p style='background-color: #e3f2fd; padding: 10px; border-radius: 5px; margin-top: 15px;'>
+            💡 <strong>Mẹo:</strong> Sử dụng các mã cổ phiếu phổ biến trên HOSE như FPT, VNM, VIC, VCB, HPG để có kết quả tốt nhất.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Footer
+st.markdown("---")
+st.caption("""
+📊 Dữ liệu từ TCBS qua thư viện vnstock | 📈 Phương pháp định giá: P/E, P/B, PEG, ROE-based | 
+💡 Kết quả chỉ mang tính tham khảo - Không phải lời khuyên đầu tư
+""")
+
+# CSS bổ sung cho mobile
+st.markdown("""
+<style>
+@media (max-width: 768px) {
+    .stColumn {
+        width: 100% !important;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: auto !important;
+        white-space: normal !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
