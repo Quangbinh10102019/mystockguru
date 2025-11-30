@@ -256,7 +256,90 @@ with st.form("analysis_form"):
 if submitted and symbol:
     with st.spinner(f"Đang phân tích {symbol.upper()} từ dữ liệu TCBS..."):
         try:
-            analyzer = StockAnalyzer(symbol)
+                            try:
+                    # SỬA CHÍNH: Xử lý trường hợp symbol rỗng hoặc không hợp lệ
+                    if not symbol or len(symbol) < 2 or len(symbol) > 5:
+                        st.error("❌ Mã cổ phiếu không hợp lệ. Vui lòng nhập mã HOSE chuẩn (2-5 ký tự).")
+                        st.stop()
+                    
+                    # SỬA CHÍNH: Thêm kiểm tra nguồn dữ liệu
+                    analyzer = StockAnalyzer(symbol)
+                    
+                    # SỬA CHÍNH: Thêm kiểm tra xem đã tải được dữ liệu chưa
+                    if analyzer.ratios is None or analyzer.ratios.empty:
+                        st.error(f"❌ Không tải được dữ liệu cho mã **{symbol}**. Vui lòng thử lại sau hoặc dùng mã khác.")
+                        st.info("💡 Gợi ý: Dùng mã cổ phiếu HOSE phổ biến như FPT, VNM, VIC, VCB, HPG...")
+                        st.stop()
+                    
+                    # Lấy chỉ số tài chính
+                    metrics = analyzer.get_latest_financial_metrics()
+                    
+                    # SỬA CHÍNH: Thêm kiểm tra metrics
+                    if metrics is None:
+                        st.error(f"❌ Không trích xuất được chỉ số tài chính cho mã **{symbol}**.")
+                        st.info("💡 Gợi ý: Thử các mã phổ biến như FPT, VNM, VIC, VCB, HPG...")
+                        st.stop()
+                    
+                    # Tính giá trị hợp lý
+                    valuation = analyzer.calculate_fair_value(metrics)
+                    
+                    if valuation is None:
+                        st.error(f"❌ Không thể tính giá trị hợp lý cho mã **{symbol}**.")
+                        st.info("💡 Gợi ý: Thử các mã phổ biến như FPT, VNM, VIC, VCB, HPG...")
+                        st.stop()
+                    
+                    # Hiển thị kết quả
+                    st.success(f"✅ Phân tích thành công {symbol}!")
+                    
+                    # Hiển thị giá hiện tại và giá trị hợp lý
+                    current_price = valuation['current_price']
+                    fair_value = valuation['consensus']['fair_value']
+                    premium = valuation['consensus']['premium']
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Giá hiện tại", f"{current_price:,.0f} VND")
+                    with col2:
+                        st.metric("Giá trị hợp lý", f"{fair_value:,.0f} VND")
+                    with col3:
+                        st.metric("Chênh lệch", f"{premium:+.1f}%")
+                    
+                    # SỬA CHÍNH: Thêm kiểm tra premium trước khi đưa ra khuyến nghị
+                    if premium is not None:
+                        recommendation, desc = analyzer.get_recommendation(premium)
+                        st.markdown(f"### {recommendation}")
+                        st.caption(desc)
+                    else:
+                        st.warning("⚠️ Không thể xác định khuyến nghị do thiếu dữ liệu.")
+                    
+                    # Hiển thị biểu đồ P/E
+                    pe_chart = analyzer.generate_pe_chart()
+                    if pe_chart:
+                        st.plotly_chart(pe_chart, use_container_width=True)
+                    
+                    # Hiển thị thông tin chi tiết
+                    st.subheader("📊 Thông tin chi tiết")
+                    st.write(f"- **P/E hiện tại**: {metrics['pe_ratio']:.2f}x")
+                    st.write(f"- **EPS**: {metrics['eps']:,.0f} VND")
+                    st.write(f"- **P/E ngành tham chiếu**: {15:.1f}x")
+                    st.write(f"- **ROE**: {metrics['roe']:.1f}%")
+                    st.write(f"- **Biên lợi nhuận ròng**: {metrics['net_margin']:.1f}%")
+                    st.write(f"- **Hệ số thanh khoản**: {metrics['current_ratio']:.2f}")
+                    st.write(f"- **Nợ/Vốn CSH**: {metrics['debt_to_equity']:.2f}")
+                    st.write(f"- **Tăng trưởng EPS 3 năm**: {metrics['eps_cagr']:.1f}%")
+                    
+                except Exception as e:
+                    # SỬA CHÍNH: Hiển thị lỗi chi tiết hơn
+                    error_msg = str(e)
+                    if "403" in error_msg or "Forbidden" in error_msg:
+                        st.error("❌ Lỗi kết nối với nguồn dữ liệu. Vui lòng thử lại sau.")
+                        st.info("💡 Gợi ý: Hệ thống có thể đang bảo trì hoặc bị chặn truy cập.")
+                    elif "No data" in error_msg or "empty" in error_msg:
+                        st.error(f"❌ Không có dữ liệu cho mã **{symbol}**. Vui lòng thử mã khác.")
+                        st.info("💡 Gợi ý: Dùng mã cổ phiếu HOSE phổ biến như FPT, VNM, VIC, VCB, HPG...")
+                    else:
+                        st.error(f"❌ Lỗi không xác định: {error_msg}")
+                        st.info("💡 Gợi ý: Thử lại với mã khác hoặc liên hệ hỗ trợ.")
             metrics = analyzer.get_latest_financial_metrics()
             
             if metrics is None:
