@@ -5,8 +5,12 @@ st.set_page_config(page_title="StockGuru Việt Nam", layout="centered")
 st.title("🎯 StockGuru Việt Nam")
 st.markdown("### Phân tích & định giá cổ phiếu — chỉ cần nhập mã!")
 
-symbol = st.text_input("Nhập mã cổ phiếu", placeholder="Ví dụ: FPT, VNM, VIC").strip().upper()
+import re
 
+symbol_input = st.text_input("Nhập mã cổ phiếu", placeholder="Ví dụ: FPT, VNM, VIC")
+symbol = (symbol_input or "").strip().upper()
+# optional: keep only letters, digits and dot (adjust regex as needed)
+symbol = re.sub(r'[^A-Z0-9.]', '', symbol)
 if st.button("🔍 Phân tích ngay"):
     if not symbol:
         st.warning("Vui lòng nhập mã cổ phiếu!")
