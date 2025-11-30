@@ -21,21 +21,21 @@ if submitted:
     if not symbol:
         st.warning("⚠️ Vui lòng nhập mã cổ phiếu!")
     else:
-        with st.spinner(f"Đang phân tích {symbol} từ dữ liệu VCI..."):
+        with st.spinner(f"Đang phân tích {symbol} từ dữ liệu TCBS..."):
             try:
-                # Khởi tạo đối tượng Finance từ vnstock
-                finance = Finance(symbol=symbol, source='VCI')
+                # 🔥 SỬA CHÍNH: DÙNG TCBS THAY VÌ VCI (tránh 403 Forbidden)
+                finance = Finance(symbol=symbol, source='TCBS')
                 
-                # Lấy chỉ số tài chính với tiếng Việt
+                # Lấy chỉ số tài chính
                 ratios = finance.ratio(period='year', lang='vi')
                 
                 if ratios.empty:
                     st.error(f"❌ Không tìm thấy dữ liệu cho mã **{symbol}**. Vui lòng kiểm tra lại mã cổ phiếu.")
                 else:
                     # Lấy năm mới nhất
-                    latest_year = ratios[('Meta', 'Năm')].iloc[0]
+                    latest_year = ratios.index[0]
                     
-                    # Lấy P/E và EPS theo đúng cấu trúc MultiIndex
+                    # Lấy P/E và EPS
                     pe_col = ('Chỉ tiêu định giá', 'P/E')
                     eps_col = ('Chỉ tiêu định giá', 'EPS (VND)')
                     
@@ -75,14 +75,14 @@ if submitted:
                             st.write(f"- **P/E hiện tại**: {pe:.2f}x")
                             st.write(f"- **EPS**: {eps:,.0f} VND")
                             st.write(f"- **P/E ngành tham chiếu**: {industry_pe}x")
-                            
                     else:
                         st.error("❌ Không tìm thấy dữ liệu P/E hoặc EPS trong báo cáo tài chính.")
             
             except Exception as e:
+                # Hiển thị thông báo hữu ích thay vì lỗi thô
                 st.error(f"❌ Lỗi khi phân tích {symbol}: {str(e)}")
                 st.info("💡 Gợi ý: Sử dụng mã cổ phiếu HOSE phổ biến như FPT, VNM, VIC, VCB, HPG...")
 
 # Footer
 st.markdown("---")
-st.caption("Dữ liệu từ VCI qua thư viện vnstock. Miễn phí - không quảng cáo.")
+st.caption("Dữ liệu từ TCBS qua thư viện vnstock. Miễn phí - không quảng cáo.")
