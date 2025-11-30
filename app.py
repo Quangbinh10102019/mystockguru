@@ -1,18 +1,15 @@
 import streamlit as st
 from vnstock import Finance
 
-# Cấu hình trang
 st.set_page_config(
     page_title="StockGuru Việt Nam",
     page_icon="🎯",
     layout="centered"
 )
 
-# Tiêu đề
 st.markdown("<h1 style='text-align: center; color: #007BFF;'>🎯 StockGuru Việt Nam</h1>", unsafe_allow_html=True)
 st.markdown("<h3 style='text-align: center; color: #666;'>Phân tích & định giá cổ phiếu chỉ trong 1 click</h3>", unsafe_allow_html=True)
 
-# Form nhập mã cổ phiếu
 with st.form("stock_analysis_form"):
     symbol = st.text_input("Nhập mã cổ phiếu", value="", placeholder="Ví dụ: FPT, VNM, VIC...").strip().upper()
     submitted = st.form_submit_button("🔍 Phân tích ngay", use_container_width=True)
@@ -23,25 +20,25 @@ if submitted:
     else:
         with st.spinner(f"Đang phân tích {symbol} từ dữ liệu TCBS..."):
             try:
-                # 🔥 SỬA CHÍNH: DÙNG TCBS THAY VÌ VCI (tránh 403 Forbidden)
+                # ✅ SỬA CHÍNH: DÙNG TCBS THAY VÌ VCI (tránh 403 Forbidden)
                 finance = Finance(symbol=symbol, source='TCBS')
-                
-                # Lấy chỉ số tài chính
                 ratios = finance.ratio(period='year', lang='vi')
-                
+
                 if ratios.empty:
-                    st.error(f"❌ Không tìm thấy dữ liệu cho mã **{symbol}**. Vui lòng kiểm tra lại mã cổ phiếu.")
+                    st.error(f"❌ Không tìm thấy dữ liệu cho mã **{symbol}**. Vui lòng thử lại sau.")
                 else:
-                    # Lấy năm mới nhất
-                    latest_year = ratios.index[0]
-                    
-                    # Lấy P/E và EPS
+                    # ✅ SỬA CHÍNH: XÁC ĐỊNH CỘT ĐÚNG THEO TÀI LIỆU
                     pe_col = ('Chỉ tiêu định giá', 'P/E')
                     eps_col = ('Chỉ tiêu định giá', 'EPS (VND)')
                     
-                    if pe_col in ratios.columns and eps_col in ratios.columns:
-                        pe = ratios[pe_col].iloc[0]
-                        eps = ratios[eps_col].iloc[0]
+                    # Kiểm tra cột tồn tại
+                    if pe_col not in ratios.columns or eps_col not in ratios.columns:
+                        st.error("❌ Không tìm thấy dữ liệu P/E hoặc EPS. Mã cổ phiếu này có thể không hỗ trợ trên TCBS.")
+                        st.info("💡 Gợi ý: Thử các mã phổ biến như FPT, VNM, VIC, VCB, HPG...")
+                    else:
+                        latest = ratios.iloc[0]
+                        pe = latest[pe_col]
+                        eps = latest[eps_col]
                         
                         if pe <= 0 or eps <= 0:
                             st.error("❌ Dữ liệu P/E hoặc EPS không hợp lệ (≤ 0).")
@@ -53,7 +50,7 @@ if submitted:
                             premium = (fair_value - current_price) / current_price * 100
                             
                             # Hiển thị kết quả
-                            st.success(f"✅ Phân tích thành công **{symbol}** ({latest_year})")
+                            st.success(f"✅ Phân tích thành công **{symbol}**")
                             
                             col1, col2, col3 = st.columns(3)
                             col1.metric("Giá hiện tại", f"{current_price:,.0f} VND")
@@ -70,19 +67,15 @@ if submitted:
                             else:
                                 st.markdown("### 🔴 **KHUYẾN NGHỊ: SELL**\nCổ phiếu đang định giá cao.")
                             
-                            # Hiển thị thông tin chi tiết
+                            # Thông tin chi tiết
                             st.subheader("📊 Thông tin chi tiết")
                             st.write(f"- **P/E hiện tại**: {pe:.2f}x")
                             st.write(f"- **EPS**: {eps:,.0f} VND")
                             st.write(f"- **P/E ngành tham chiếu**: {industry_pe}x")
-                    else:
-                        st.error("❌ Không tìm thấy dữ liệu P/E hoặc EPS trong báo cáo tài chính.")
             
             except Exception as e:
-                # Hiển thị thông báo hữu ích thay vì lỗi thô
                 st.error(f"❌ Lỗi khi phân tích {symbol}: {str(e)}")
                 st.info("💡 Gợi ý: Sử dụng mã cổ phiếu HOSE phổ biến như FPT, VNM, VIC, VCB, HPG...")
 
-# Footer
 st.markdown("---")
 st.caption("Dữ liệu từ TCBS qua thư viện vnstock. Miễn phí - không quảng cáo.")
