@@ -15,15 +15,28 @@ if st.button("🔍 Phân tích ngay"):
             with st.spinner(f"Đang lấy dữ liệu {symbol} từ VCI..."):
                 # Lấy dữ liệu từ VCI (nguồn uy tín)
                 finance = Finance(symbol=symbol, source='VCI')
-                ratios = finance.ratio(period='year', lang='en')
+                ratios = finance.ratio(period='year', lang='vi')  # ← DÙNG TIẾNG VIỆT
                 
                 if ratios.empty:
                     st.error(f"❌ Không tìm thấy dữ liệu cho **{symbol}**. Vui lòng kiểm tra lại mã.")
                 else:
-                    # Lấy P/E, EPS mới nhất
+                    # Lấy dữ liệu mới nhất
                     latest = ratios.iloc[0]
-                    pe = latest.get(('Chỉ tiêu định giá', 'P/E'), latest.get('P/E'))
-                    eps = latest.get(('Chỉ tiêu định giá', 'EPS (VND)'), latest.get('EPS_basis'))
+                    
+                    # Tìm P/E
+                    if ('Chỉ tiêu định giá', 'P/E') in ratios.columns:
+                        pe_val = ratios[('Chỉ tiêu định giá', 'P/E')].iloc[0]
+                    else:
+                        pe_val = None
+                    
+                    # Tìm EPS
+                    if ('Chỉ tiêu định giá', 'EPS (VND)') in ratios.columns:
+                        eps_val = ratios[('Chỉ tiêu định giá', 'EPS (VND)')].iloc[0]
+                    else:
+                        eps_val = None
+                    
+                    pe = pe_val
+                    eps = eps_val
                     
                     if pe and eps:
                         current_price = pe * eps
