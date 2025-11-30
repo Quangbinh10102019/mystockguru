@@ -13,22 +13,23 @@ if st.button("🔍 Phân tích ngay"):
     if not symbol:
         st.warning("Vui lòng nhập mã cổ phiếu!")
     else:
-        # ✅ st.spinner chỉ dùng ở đây — trong luồng Streamlit
         with st.spinner(f"Đang lấy dữ liệu {symbol} từ VCI..."):
             try:
-                # Lấy dữ liệu từ vnstock (nguồn VCI, tiếng Việt)
                 finance = Finance(symbol=symbol, source='VCI')
                 ratios = finance.ratio(period='year', lang='vi')
 
                 if ratios.empty:
                     st.error(f"❌ Không tìm thấy dữ liệu cho **{symbol}**. Vui lòng thử mã HOSE như FPT, VNM, VIC.")
                 else:
-                    # Lấy dòng mới nhất
                     latest = ratios.iloc[0]
 
-                    # Truy xuất P/E và EPS theo đúng MultiIndex từ tài liệu
-                    pe = latest.get(('Chỉ tiêu định giá', 'P/E'), None)
-                    eps = latest.get(('Chỉ tiêu định giá', 'EPS (VND)'), None)
+                    # ✅ SỬA LỖI: Truy xuất đúng MultiIndex
+                    try:
+                        pe = latest[('Chỉ tiêu định giá', 'P/E')]
+                        eps = latest[('Chỉ tiêu định giá', 'EPS (VND)')]
+                    except KeyError:
+                        pe = None
+                        eps = None
 
                     if pe is None or eps is None:
                         st.error("❌ Dữ liệu P/E hoặc EPS không có. Cổ phiếu này có thể không đủ thông tin định giá.")
@@ -36,7 +37,7 @@ if st.button("🔍 Phân tích ngay"):
                         st.error("❌ Dữ liệu P/E hoặc EPS không hợp lệ (≤ 0).")
                     else:
                         current_price = pe * eps
-                        industry_pe = 15  # bạn có thể điều chỉnh sau
+                        industry_pe = 15
                         fair_value = eps * industry_pe
                         premium = (fair_value - current_price) / current_price * 100
 
@@ -53,7 +54,7 @@ if st.button("🔍 Phân tích ngay"):
                             st.markdown("### 🔴 **KHUYẾN NGHỊ: BÁN**")
 
             except Exception as e:
-                st.error(f"❌ Lỗi khi phân tích {symbol}. Mã có thể không tồn tại hoặc không có dữ liệu trên VCI.")
+                st.error(f"❌ Lỗi khi phân tích {symbol}.")
                 st.caption("Gợi ý: Dùng mã HOSE chuẩn như FPT, VNM, VIC, VCB, HPG...")
 
 # === Footer ===
