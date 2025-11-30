@@ -21,9 +21,10 @@ if st.button("🔍 Phân tích ngay"):
                 if ratios.empty:
                     st.error(f"❌ Không tìm thấy dữ liệu cho **{symbol}**. Vui lòng thử mã HOSE như FPT, VNM, VIC.")
                 else:
+                    # Lấy dòng mới nhất
                     latest = ratios.iloc[0]
 
-                    # ✅ SỬA LỖI: Truy xuất đúng MultiIndex
+                    # ✅ TRUY XUẤT ĐÚNG MULTIINDEX
                     try:
                         pe = latest[('Chỉ tiêu định giá', 'P/E')]
                         eps = latest[('Chỉ tiêu định giá', 'EPS (VND)')]
@@ -56,7 +57,3 @@ if st.button("🔍 Phân tích ngay"):
             except Exception as e:
                 st.error(f"❌ Lỗi khi phân tích {symbol}.")
                 st.caption("Gợi ý: Dùng mã HOSE chuẩn như FPT, VNM, VIC, VCB, HPG...")
-
-# === Footer ===
-st.markdown("---")
-st.caption("Dữ liệu từ VCI qua thư viện vnstock. Miễn phí – không quảng cáo.")
