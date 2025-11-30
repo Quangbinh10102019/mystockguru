@@ -86,19 +86,21 @@ st.markdown("""
 class StockAnalyzer:
     def __init__(self, symbol):
         self.symbol = symbol.upper()
-        try:
-            # KHỞI TẠO ĐÚNG VỚI TCBS
-            self.stock_obj = Vnstock().stock(symbol=self.symbol, source='TCBS')
-            self.finance = self.stock_obj.finance
-            self.load_financial_data()
-        except Exception as e:
-            st.error(f"❌ Lỗi khi kết nối TCBS: {str(e)}")
-            self.ratios = None
-    
+        self.ratios = None
+        self.income = None
+        self.balance = None
+        self.cashflow = None
+        self.stock_obj = None
+        self.load_financial_data()
+        
     def load_financial_data(self):
         """Tải toàn bộ dữ liệu tài chính cần thiết từ TCBS"""
         try:
-            # Lấy chỉ số tài chính - DÙNG NGUỒN TCBS
+            # KHỞI TẠO ĐÚNG CÁCH VỚI TCBS
+            self.stock_obj = Vnstock().stock(symbol=self.symbol, source='TCBS')
+            self.finance = self.stock_obj.finance
+            
+            # Lấy chỉ số tài chính
             self.ratios = self.finance.ratio(period='year')
             
             # Lấy báo cáo KQKD
@@ -107,244 +109,214 @@ class StockAnalyzer:
             # Lấy báo cáo CĐKT
             self.balance = self.finance.balance_sheet(period='year')
             
+            # Không bắt buộc phải có LCTT
+            try:
+                self.cashflow = self.finance.cash_flow(period='year')
+            except:
+                self.cashflow = None
+                
         except Exception as e:
-            st.error(f"❌ Lỗi khi tải dữ liệu: {str(e)}")
-            self.ratios = None
+            st.error(f"❌ Lỗi khi kết nối dữ liệu TCBS: {str(e)}")
+            st.info("💡 Gợi ý: Thử lại với mã cổ phiếu HOSE phổ biến như FPT, VNM, VIC...")
     
     def get_latest_financial_metrics(self):
         """Lấy các chỉ số tài chính quan trọng nhất - PHIÊN BẢN TCBS"""
         if self.ratios is None or self.ratios.empty:
+            st.error("❌ Không tải được dữ liệu tài chính")
             return None
         
         try:
-            # Lấy dòng dữ liệu mới nhất
-            latest = self.ratios.iloc[0]
-            year = self.ratios.index[0]
+            # Lấy năm mới nhất
+            latest_year = self.ratios.index[0]
+            latest = self.ratios.loc[latest_year]
+            
+            # XÁC ĐỊNH TÊN CỘT HỢP LỆ VỚI TCBS
+            def safe_get_value(series, keys, default=0):
+                """Lấy giá trị an toàn với nhiều tên cột có thể"""
+                for key in keys:
+                    if key in series.index:
+                        value = series[key]
+                        if isinstance(value, (int, float)) and not pd.isna(value):
+                            return float(value)
+                return default
             
             # Trích xuất các chỉ số quan trọng từ TCBS
-            # TCBS dùng tên cột tiếng Anh đơn giản
+            pe_ratio = safe_get_value(latest, ['pe', 'priceToEarning', 'P/E'])
+            pb_ratio = safe_get_value(latest, ['pb', 'priceToBook', 'P/B'])
+            ps_ratio = safe_get_value(latest, ['ps', 'priceToSales', 'P/S'])
             
-            # Chỉ số định giá
-            pe_ratio = latest.get('priceToEarning', latest.get('pe', 0))
-            pb_ratio = latest.get('priceToBook', latest.get('pb', 0))
-            ps_ratio = latest.get('priceToSales', latest.get('ps', 0))
-            
-            # EPS và BVPS - TCBS trả về đơn vị nghìn đồng
-            eps = latest.get('earningsPerShare', latest.get('eps', 0)) * 1000  # chuyển sang VND
-            bvps = latest.get('bookValuePerShare', latest.get('bvps', 0)) * 1000  # chuyển sang VND
+            # EPS và BVPS - TCBS trả về đơn vị nghìn đồng, chuyển sang VND
+            eps = safe_get_value(latest, ['eps', 'earningsPerShare', 'EPS']) * 1000
+            bvps = safe_get_value(latest, ['bvps', 'bookValuePerShare', 'BVPS']) * 1000
             
             # Chỉ số sinh lời
-            roe = latest.get('returnOnEquity', latest.get('roe', 0)) * 100  # chuyển sang %
-            roa = latest.get('returnOnAssets', latest.get('roa', 0)) * 100  # chuyển sang %
-            
-            # Biên lợi nhuận
-            gross_margin = latest.get('grossProfitMargin', latest.get('biMargin', 0)) * 100
-            net_margin = latest.get('netProfitMargin', latest.get('postTaxMargin', 0)) * 100
+            roe = safe_get_value(latest, ['roe', 'returnOnEquity', 'ROE']) * 100  # chuyển sang %
+            roa = safe_get_value(latest, ['roa', 'returnOnAssets', 'ROA']) * 100  # chuyển sang %
+            gross_margin = safe_get_value(latest, ['grossMargin', 'biMargin', 'Biên lợi nhuận gộp']) * 100
+            net_margin = safe_get_value(latest, ['netMargin', 'postTaxMargin', 'Biên lợi nhuận ròng']) * 100
             
             # Chỉ số thanh khoản & đòn bẩy
-            current_ratio = latest.get('currentRatio', 1.0)
-            debt_to_equity = latest.get('debtToEquity', 0.5)
+            current_ratio = safe_get_value(latest, ['currentRatio', 'Hệ số thanh toán hiện thời'], 1.0)
+            debt_to_equity = safe_get_value(latest, ['debtToEquity', 'Nợ/VCSH'], 0.5)
             
-            # Tăng trưởng EPS 3 năm
-            eps_cagr = latest.get('earningsPerShareGrowth', latest.get('epsGrowth', 0)) * 100
+            # Tăng trưởng EPS
+            eps_cagr = safe_get_value(latest, ['epsGrowth', 'earningsPerShareGrowth']) * 100
             
-            # Vốn hóa (tỷ đồng) - TCBS có thể không cung cấp trực tiếp
+            # Lấy thông tin thị trường từ overview
             market_cap = None
             shares_outstanding = None
-            if hasattr(self.stock_obj, 'overview'):
-                try:
+            
+            try:
+                if hasattr(self.stock_obj, 'overview'):
                     overview = self.stock_obj.overview()
-                    if 'marketCap' in overview:
-                        market_cap = overview['marketCap']  # tỷ đồng
-                    if 'sharesOutstanding' in overview:
-                        shares_outstanding = overview['sharesOutstanding'] / 1e6  # triệu cổ phiếu
-                except:
-                    pass
+                    market_cap = overview.get('marketCap')  # tỷ đồng
+                    # Lấy số CP lưu hành (đơn vị: triệu CP)
+                    shares_outstanding = overview.get('shareOutstanding', 0) / 1e6
+            except:
+                # Tính toán dự phòng
+                if eps > 0 and pe_ratio > 0 and market_cap is None:
+                    # Ước lượng vốn hóa từ P/E và EPS
+                    market_cap = (eps * pe_ratio * shares_outstanding) / 1e9 if shares_outstanding else None
             
-            if market_cap is None and shares_outstanding is not None and eps > 0:
-                market_cap = (pe_ratio * eps * shares_outstanding * 1e6) / 1e9  # tỷ đồng
-            
+            # Đảm bảo các giá trị hợp lệ
+            if eps <= 0 or bvps <= 0 or pe_ratio <= 0:
+                st.error("❌ Dữ liệu tài chính không hợp lệ (EPS, BVPS hoặc P/E ≤ 0)")
+                return None
+                
             return {
-                'year': year,
-                'pe_ratio': float(pe_ratio),
-                'pb_ratio': float(pb_ratio),
-                'ps_ratio': float(ps_ratio),
-                'eps': float(eps),
-                'bvps': float(bvps),
-                'market_cap': float(market_cap) if market_cap else None,
-                'shares_outstanding': float(shares_outstanding) if shares_outstanding else None,
-                'roe': float(roe),
-                'roa': float(roa),
-                'gross_margin': float(gross_margin),
-                'net_margin': float(net_margin),
-                'current_ratio': float(current_ratio),
-                'debt_to_equity': float(debt_to_equity),
-                'eps_cagr': float(eps_cagr)
+                'year': int(latest_year),
+                'pe_ratio': pe_ratio,
+                'pb_ratio': pb_ratio,
+                'ps_ratio': ps_ratio,
+                'eps': eps,
+                'bvps': bvps,
+                'market_cap': market_cap,
+                'shares_outstanding': shares_outstanding,
+                'roe': roe,
+                'roa': roa,
+                'gross_margin': gross_margin,
+                'net_margin': net_margin,
+                'current_ratio': current_ratio,
+                'debt_to_equity': debt_to_equity,
+                'eps_cagr': eps_cagr
             }
+            
         except Exception as e:
-            st.error(f"❌ Lỗi khi trích xuất chỉ số: {str(e)}")
+            st.error(f"❌ Lỗi khi xử lý dữ liệu tài chính: {str(e)}")
+            st.info("📝 Gợi ý khắc phục: Thử các mã cổ phiếu phổ biến như FPT, VNM, VIC, VCB...")
             return None
-    
-    def calculate_fair_value(self, metrics):
-        """Tính giá trị hợp lý bằng nhiều phương pháp"""
-        if metrics is None:
-            return None
-        
-        current_price = metrics['pe_ratio'] * metrics['eps']
-        results = {
-            'current_price': current_price,
-            'methods': {},
-            'premiums': {}
-        }
-        
-        # 1. P/E so sánh ngành - ngành chứng khoán thường có P/E từ 12-18
-        industry_pe_avg = self.get_industry_pe()
-        industry_pe_fair = metrics['eps'] * industry_pe_avg
-        results['methods']['pe_industry'] = industry_pe_fair
-        results['premiums']['pe_industry'] = (industry_pe_fair - current_price) / current_price * 100
-        
-        # 2. P/B so sánh ngành - ngành chứng khoán thường có P/B từ 1.5-2.5
-        industry_pb_avg = self.get_industry_pb()
-        pb_fair = metrics['bvps'] * industry_pb_avg
-        results['methods']['pb_industry'] = pb_fair
-        results['premiums']['pb_industry'] = (pb_fair - current_price) / current_price * 100
-        
-        # 3. Tăng trưởng EPS (PEG) - PEG hợp lý = 1
-        eps_growth = metrics['eps_cagr']
-        if eps_growth > 0 and eps_growth < 100:  # tránh giá trị bất thường
-            peg_ratio = 1.0  # PEG hợp lý
-            growth_pe = eps_growth * peg_ratio
-            peg_fair = metrics['eps'] * growth_pe
-            results['methods']['peg'] = peg_fair
-            results['premiums']['peg'] = (peg_fair - current_price) / current_price * 100
-        
-        # 4. ROE-based valuation - Cổ phiếu chất lượng cao có ROE > 15%
-        roe = metrics['roe']
-        if roe > 5 and roe < 100:  # tránh giá trị bất thường
-            # Công thức: P/E = 15 + (ROE - 15) * 0.5 cho ROE > 15%
-            # P/E = ROE * 1.2 cho ROE <= 15%
-            if roe > 15:
-                roe_pe = 15 + (roe - 15) * 0.5
-            else:
-                roe_pe = roe * 1.2
-            roe_fair = metrics['eps'] * roe_pe
-            results['methods']['roe_based'] = roe_fair
-            results['premiums']['roe_based'] = (roe_fair - current_price) / current_price * 100
-        
-        # 5. P/S so sánh ngành
-        industry_ps_avg = self.get_industry_ps()
-        ps_fair = current_price / metrics['ps_ratio'] * industry_ps_avg
-        results['methods']['ps_industry'] = ps_fair
-        results['premiums']['ps_industry'] = (ps_fair - current_price) / current_price * 100
-        
-        # 6. Tính fair value tổng hợp
-        valid_methods = []
-        weights = {}
-        
-        # Gán trọng số dựa trên độ tin cậy của từng phương pháp
-        if 'pe_industry' in results['methods'] and results['premiums']['pe_industry'] is not None:
-            valid_methods.append('pe_industry')
-            weights['pe_industry'] = 0.3
-        
-        if 'pb_industry' in results['methods'] and results['premiums']['pb_industry'] is not None:
-            valid_methods.append('pb_industry')
-            weights['pb_industry'] = 0.25
-        
-        if 'peg' in results['methods'] and results['premiums']['peg'] is not None:
-            valid_methods.append('peg')
-            weights['peg'] = 0.2
-        
-        if 'roe_based' in results['methods'] and results['premiums']['roe_based'] is not None:
-            valid_methods.append('roe_based')
-            weights['roe_based'] = 0.15
-        
-        if 'ps_industry' in results['methods'] and results['premiums']['ps_industry'] is not None:
-            valid_methods.append('ps_industry')
-            weights['ps_industry'] = 0.1
-        
-        if valid_methods:
-            weighted_sum = 0
-            total_weight = 0
-            
-            for method in valid_methods:
-                value = results['methods'][method]
-                weight = weights[method]
-                weighted_sum += value * weight
-                total_weight += weight
-            
-            if total_weight > 0:
-                fair_value = weighted_sum / total_weight
-                premium = (fair_value - current_price) / current_price * 100
-                results['consensus'] = {
-                    'fair_value': fair_value,
-                    'premium': premium
-                }
-        
-        return results
     
     def get_industry_pe(self):
         """Lấy P/E trung bình ngành phù hợp với cổ phiếu"""
         # Phân loại ngành dựa trên mã cổ phiếu
-        if self.symbol.startswith(('BVH', 'BMI', 'BIC', 'BID', 'CTG', 'EIB', 'HDB', 
-                                  'LPB', 'MBB', 'MSB', 'OCB', 'SHB', 'STB', 'TCB', 'TPB', 'VCB', 'VIB', 'VPB')):
-            return 8.5  # Ngân hàng
+        bank_stocks = ['BID', 'CTG', 'VCB', 'ACB', 'MBB', 'TPB', 'VPB', 'TCB', 'HDB', 'STB', 'VIB', 'EIB', 'SHB', 'LPB', 'MSB', 'NVB', 'ABB', 'BAB']
+        real_estate_stocks = ['VIC', 'VHM', 'NVL', 'PDR', 'DXG', 'KDH', 'NLG', 'TTC', 'HAR', 'DIG', 'LDG', 'CEO', 'TIP', 'SCR', 'VRE']
+        consumer_stocks = ['VNM', 'FPT', 'MWG', 'PNJ', 'SAB', 'MSN', 'HAG', 'DGC', 'GAS', 'REE', 'HCM']
+        securities_stocks = ['SSI', 'VND', 'HCM', 'TVS', 'AGR', 'CTS', 'MBS', 'VDS', 'SHS', 'APS', 'HSV', 'BSI', 'CVS', 'CJSC']
         
-        elif self.symbol.startswith(('FPT', 'CMG', 'DXG', 'KDH', 'NVL', 'PDR', 'VHM', 
-                                    'VIC', 'VRE', 'NLG', 'TTC', 'HAR')):
-            return 6.5  # Bất động sản
-        
-        elif self.symbol.startswith(('SAB', 'MSN', 'MWG', 'PNJ', 'VNM', 'HAG', 'DGC',
-                                    'GAS', 'REE', 'HCM', 'SSI', 'VND', 'TVS', 'AGR')):
-            return 20.0  # Tiêu dùng & Dịch vụ
-        
-        elif self.symbol.startswith(('VJC', 'HVN', 'AAA', 'HCM', 'PLX', 'DPM', 'DRC',
-                                    'BWE', 'PC1', 'SBT')):
-            return 15.0  # Công nghiệp & Nguyên liệu
-        
+        if any(self.symbol.startswith(stock) for stock in bank_stocks):
+            return 8.5
+        elif any(self.symbol.startswith(stock) for stock in real_estate_stocks):
+            return 6.5
+        elif any(self.symbol.startswith(stock) for stock in consumer_stocks):
+            return 20.0
+        elif any(self.symbol.startswith(stock) for stock in securities_stocks):
+            return 16.0
         else:
             return 15.0  # Mặc định
     
     def get_industry_pb(self):
         """Lấy P/B trung bình ngành"""
-        if self.symbol.startswith(('BVH', 'BMI', 'BIC', 'BID', 'CTG', 'EIB', 'HDB', 
-                                  'LPB', 'MBB', 'MSB', 'OCB', 'SHB', 'STB', 'TCB', 'TPB', 'VCB', 'VIB', 'VPB')):
-            return 1.2  # Ngân hàng
+        bank_stocks = ['BID', 'CTG', 'VCB', 'ACB', 'MBB', 'TPB', 'VPB', 'TCB', 'HDB', 'STB', 'VIB', 'EIB', 'SHB', 'LPB', 'MSB', 'NVB', 'ABB', 'BAB']
+        real_estate_stocks = ['VIC', 'VHM', 'NVL', 'PDR', 'DXG', 'KDH', 'NLG', 'TTC', 'HAR', 'DIG', 'LDG', 'CEO', 'TIP', 'SCR', 'VRE']
+        consumer_stocks = ['VNM', 'FPT', 'MWG', 'PNJ', 'SAB', 'MSN', 'HAG', 'DGC', 'GAS', 'REE', 'HCM']
+        securities_stocks = ['SSI', 'VND', 'HCM', 'TVS', 'AGR', 'CTS', 'MBS', 'VDS', 'SHS', 'APS', 'HSV', 'BSI', 'CVS', 'CJSC']
         
-        elif self.symbol.startswith(('FPT', 'CMG', 'DXG', 'KDH', 'NVL', 'PDR', 'VHM', 
-                                    'VIC', 'VRE', 'NLG', 'TTC', 'HAR')):
-            return 0.9  # Bất động sản
-        
-        elif self.symbol.startswith(('SAB', 'MSN', 'MWG', 'PNJ', 'VNM', 'HAG', 'DGC',
-                                    'GAS', 'REE', 'HCM', 'SSI', 'VND', 'TVS', 'AGR')):
-            return 3.5  # Tiêu dùng & Dịch vụ
-        
-        elif self.symbol.startswith(('VJC', 'HVN', 'AAA', 'HCM', 'PLX', 'DPM', 'DRC',
-                                    'BWE', 'PC1', 'SBT')):
-            return 1.8  # Công nghiệp & Nguyên liệu
-        
+        if any(self.symbol.startswith(stock) for stock in bank_stocks):
+            return 1.2
+        elif any(self.symbol.startswith(stock) for stock in real_estate_stocks):
+            return 0.9
+        elif any(self.symbol.startswith(stock) for stock in consumer_stocks):
+            return 3.5
+        elif any(self.symbol.startswith(stock) for stock in securities_stocks):
+            return 2.5
         else:
-            return 2.0  # Mặc định
+            return 2.0
     
-    def get_industry_ps(self):
-        """Lấy P/S trung bình ngành"""
-        if self.symbol.startswith(('BVH', 'BMI', 'BIC', 'BID', 'CTG', 'EIB', 'HDB', 
-                                  'LPB', 'MBB', 'MSB', 'OCB', 'SHB', 'STB', 'TCB', 'TPB', 'VCB', 'VIB', 'VPB')):
-            return 3.0  # Ngân hàng
-        
-        elif self.symbol.startswith(('FPT', 'CMG', 'DXG', 'KDH', 'NVL', 'PDR', 'VHM', 
-                                    'VIC', 'VRE', 'NLG', 'TTC', 'HAR')):
-            return 1.5  # Bất động sản
-        
-        elif self.symbol.startswith(('SAB', 'MSN', 'MWG', 'PNJ', 'VNM', 'HAG', 'DGC',
-                                    'GAS', 'REE', 'HCM', 'SSI', 'VND', 'TVS', 'AGR')):
-            return 1.8  # Tiêu dùng & Dịch vụ
-        
-        elif self.symbol.startswith(('VJC', 'HVN', 'AAA', 'HCM', 'PLX', 'DPM', 'DRC',
-                                    'BWE', 'PC1', 'SBT')):
-            return 0.9  # Công nghiệp & Nguyên liệu
-        
-        else:
-            return 1.5  # Mặc định
+    def calculate_fair_value(self, metrics):
+        """Tính giá trị hợp lý bằng nhiều phương pháp"""
+        try:
+            if metrics is None:
+                return None
+                
+            current_price = metrics['pe_ratio'] * metrics['eps']
+            results = {
+                'current_price': current_price,
+                'methods': {},
+                'premiums': {}
+            }
+            
+            # 1. P/E so sánh ngành
+            industry_pe_avg = self.get_industry_pe()
+            pe_fair = metrics['eps'] * industry_pe_avg
+            results['methods']['pe_industry'] = pe_fair
+            results['premiums']['pe_industry'] = (pe_fair - current_price) / current_price * 100
+            
+            # 2. P/B so sánh ngành
+            industry_pb_avg = self.get_industry_pb()
+            pb_fair = metrics['bvps'] * industry_pb_avg
+            results['methods']['pb_industry'] = pb_fair
+            results['premiums']['pb_industry'] = (pb_fair - current_price) / current_price * 100
+            
+            # 3. PEG Ratio (nếu có dữ liệu tăng trưởng hợp lệ)
+            eps_growth = metrics['eps_cagr']
+            if 1 <= eps_growth <= 100:  # Chỉ tính nếu tăng trưởng hợp lý
+                peg_ratio = 1.0
+                growth_pe = eps_growth * peg_ratio
+                peg_fair = metrics['eps'] * growth_pe
+                results['methods']['peg'] = peg_fair
+                results['premiums']['peg'] = (peg_fair - current_price) / current_price * 100
+            
+            # 4. ROE-based valuation
+            roe = metrics['roe']
+            if 5 <= roe <= 50:  # Chỉ tính nếu ROE hợp lý
+                if roe > 15:
+                    roe_pe = 15 + (roe - 15) * 0.5
+                else:
+                    roe_pe = roe * 1.0
+                roe_fair = metrics['eps'] * roe_pe
+                results['methods']['roe_based'] = roe_fair
+                results['premiums']['roe_based'] = (roe_fair - current_price) / current_price * 100
+            
+            # 5. Tính fair value tổng hợp
+            valid_methods = [method for method in results['methods'].keys() 
+                           if method in results['premiums'] and results['premiums'][method] is not None]
+            
+            if valid_methods:
+                # Trọng số hóa các phương pháp
+                weights = {
+                    'pe_industry': 0.4,
+                    'pb_industry': 0.3,
+                    'peg': 0.2 if 'peg' in valid_methods else 0,
+                    'roe_based': 0.1 if 'roe_based' in valid_methods else 0
+                }
+                
+                # Chuẩn hóa trọng số
+                total_weight = sum(weights[method] for method in valid_methods if weights[method] > 0)
+                if total_weight > 0:
+                    fair_value = sum(results['methods'][method] * weights[method] 
+                                   for method in valid_methods if weights[method] > 0) / total_weight
+                    premium = (fair_value - current_price) / current_price * 100
+                    results['consensus'] = {
+                        'fair_value': fair_value,
+                        'premium': premium
+                    }
+            
+            return results
+            
+        except Exception as e:
+            st.error(f"❌ Lỗi trong quá trình tính toán định giá: {str(e)}")
+            return None
     
     def get_recommendation(self, premium):
         """Đưa ra khuyến nghị dựa trên chênh lệch định giá"""
@@ -365,37 +337,54 @@ class StockAnalyzer:
             return None
         
         try:
-            # Lấy dữ liệu P/E lịch sử
+            # Lấy 5 năm gần nhất
             years = self.ratios.index.tolist()[:5]
             pe_values = []
             
-            for year in years:
-                row = self.ratios.loc[year]
-                pe_value = row.get('priceToEarning', row.get('pe', 0))
-                pe_values.append(pe_value)
+            # Xác định tên cột P/E có sẵn
+            pe_col = None
+            possible_cols = ['pe', 'priceToEarning', 'P/E']
+            for col in possible_cols:
+                if col in self.ratios.columns:
+                    pe_col = col
+                    break
             
+            if pe_col is None:
+                return None
+            
+            for year in years:
+                try:
+                    pe_value = self.ratios.loc[year, pe_col]
+                    if pd.isna(pe_value) or pe_value <= 0:
+                        pe_value = 0
+                    pe_values.append(pe_value)
+                except:
+                    pe_values.append(0)
+            
+            # Tạo DataFrame cho biểu đồ
             df = pd.DataFrame({
                 'Năm': years,
                 'P/E': pe_values
             })
             
-            if df['P/E'].sum() == 0:
-                return None
+            # Chỉ vẽ biểu đồ nếu có dữ liệu hợp lệ
+            if sum(pe_values) > 0:
+                fig = px.line(df, x='Năm', y='P/E', markers=True, 
+                              title=f'P/E lịch sử {self.symbol}',
+                              line_shape='spline')
+                fig.update_traces(line=dict(width=3, color='#0066cc'), 
+                                  marker=dict(size=10, color='#ff6600'))
+                fig.update_layout(
+                    plot_bgcolor='white',
+                    xaxis_title='Năm',
+                    yaxis_title='P/E Ratio',
+                    hovermode='x unified'
+                )
+                return fig
+            return None
             
-            fig = px.line(df, x='Năm', y='P/E', markers=True, 
-                          title=f'P/E lịch sử {self.symbol}',
-                          line_shape='spline')
-            fig.update_traces(line=dict(width=3, color='#0066cc'), 
-                              marker=dict(size=10, color='#ff6600'))
-            fig.update_layout(
-                plot_bgcolor='white',
-                xaxis_title='Năm',
-                yaxis_title='P/E Ratio',
-                hovermode='x unified'
-            )
-            return fig
         except Exception as e:
-            st.warning(f"⚠️ Không thể tạo biểu đồ P/E: {str(e)}")
+            st.warning(f"⚠️ Không thể tạo biểu đồ: {str(e)}")
             return None
     
     def generate_financial_health_chart(self, metrics):
@@ -546,15 +535,7 @@ if submitted and symbol:
                                 'Chênh lệch (%)': valuation['premiums']['roe_based']
                             })
                         
-                        if 'ps_industry' in valuation['methods']:
-                            methods_data.append({
-                                'Phương pháp': 'P/S ngành',
-                                'P/S tham chiếu': f"{analyzer.get_industry_ps():.1f}x",
-                                'Giá trị hợp lý (VND)': valuation['methods']['ps_industry'],
-                                'Chênh lệch (%)': valuation['premiums']['ps_industry']
-                            })
-                        
-                        if methods_data:
+                        if methods_
                             methods_df = pd.DataFrame(methods_data)
                             
                             # Định dạng bảng đẹp
@@ -588,8 +569,8 @@ if submitted and symbol:
                                 current_pe = metrics['pe_ratio']
                                 if len(analyzer.ratios) >= 3:
                                     avg_pe_3y = np.mean([
-                                        analyzer.ratios.iloc[i].get('priceToEarning', 
-                                                                   analyzer.ratios.iloc[i].get('pe', 0))
+                                        analyzer.ratios.iloc[i].get('pe', 
+                                                                   analyzer.ratios.iloc[i].get('priceToEarning', 0))
                                         for i in range(3)
                                     ])
                                     pe_analysis = ""
