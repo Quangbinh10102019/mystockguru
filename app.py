@@ -1,11 +1,14 @@
 import streamlit as st
 from vnstock import Finance
 
+# === TIÊU ĐỀ ===
 st.title("🎯 StockGuru Việt Nam")
 st.markdown("### Nhập mã cổ phiếu để xem định giá!")
 
+# === Ô NHẬP VÀ NÚT ===
 symbol = st.text_input("Mã cổ phiếu", placeholder="Ví dụ: FPT, VNM, VIC").strip().upper()
 
+# === XỬ LÝ KHI NHẤN NÚT ===
 if st.button("🔍 Phân tích ngay"):
     if not symbol:
         st.warning("Vui lòng nhập mã cổ phiếu!")
@@ -16,25 +19,24 @@ if st.button("🔍 Phân tích ngay"):
                 ratios = finance.ratio(period='year', lang='vi')
 
                 if ratios.empty:
-                    st.error(f"❌ Không tìm thấy dữ liệu cho **{symbol}**.")
+                    st.error(f"❌ Không tìm thấy dữ liệu cho **{symbol}**. Vui lòng thử mã HOSE như FPT, VNM, VIC.")
                 else:
-                    # === BƯỚC 1: XÁC ĐỊNH VỊ TRÍ CỘT ===
-                    columns_list = list(ratios.columns)
-                    try:
-                        pe_col_idx = columns_list.index(('Chỉ tiêu định giá', 'P/E'))
-                        eps_col_idx = columns_list.index(('Chỉ tiêu định giá', 'EPS (VND)'))
-                    except ValueError:
-                        st.error("❌ Thiếu cột P/E hoặc EPS. Cổ phiếu này không đủ dữ liệu định giá trên VCI.")
+                    # Lấy dòng mới nhất
+                    latest = ratios.iloc[0]
+
+                    # ✅ TRUY XUẤT P/E VÀ EPS THEO MULTIINDEX — CÁCH AN TOÀN NHẤT
+                    pe_col = ('Chỉ tiêu định giá', 'P/E')
+                    eps_col = ('Chỉ tiêu định giá', 'EPS (VND)')
+
+                    if pe_col in ratios.columns and eps_col in ratios.columns:
+                        pe = latest[pe_col]
+                        eps = latest[eps_col]
+                    else:
+                        st.error("❌ Thiếu cột P/E hoặc EPS. Mã cổ phiếu này có thể không hỗ trợ trên VCI.")
                         st.stop()
 
-                    # === BƯỚC 2: LẤY GIÁ TRỊ THEO CHỈ SỐ ===
-                    latest_row = ratios.iloc[0]
-                    pe = latest_row.iloc[pe_col_idx]
-                    eps = latest_row.iloc[eps_col_idx]
-
-                    # === KIỂM TRA HỢP LỆ ===
-                    if pe is None or eps is None or pe <= 0 or eps <= 0:
-                        st.error("❌ Dữ liệu P/E hoặc EPS không hợp lệ.")
+                    if pe <= 0 or eps <= 0:
+                        st.error("❌ Dữ liệu P/E hoặc EPS không hợp lệ (≤ 0).")
                     else:
                         current_price = pe * eps
                         industry_pe = 15
@@ -54,5 +56,5 @@ if st.button("🔍 Phân tích ngay"):
                             st.markdown("### 🔴 **KHUYẾN NGHỊ: BÁN**")
 
             except Exception as e:
-                st.error("❌ Lỗi khi phân tích. Mã có thể không tồn tại hoặc không có dữ liệu trên VCI.")
-                st.caption("Gợi ý: Dùng mã HOSE phổ biến như FPT, VNM, VIC, VCB, HPG...")
+                st.error(f"❌ Lỗi khi phân tích {symbol}.")
+                st.caption("Gợi ý: Dùng mã HOSE chuẩn như FPT, VNM, VIC, VCB, HPG...")
